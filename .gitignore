@@ -1,0 +1,7 @@
+# custom
+/data/
+/work_dirs/
+/VST-clone/
+
+# Pytorch
+*.pth
