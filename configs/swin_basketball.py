@@ -1,9 +1,9 @@
 # data files/settings
-file_train_labels = "data/MultiSubjects/train_list.txt"
-file_val_labels = "data/MultiSubjects/val_list.txt"
-file_test_labels = "data/MultiSubjects/test_list.txt"
-data_root_train = "data/MultiSubjects/videos"
-data_root_val = "data/MultiSubjects/videos"
+file_train_labels = "data/multisubjects/train_list.txt"
+file_val_labels = "data/multisubjects/val_list.txt"
+file_test_labels = "data/multisubjects/test_list.txt"
+data_root_train = "data/multisubjects/videos"
+data_root_val = "data/multisubjects/videos"
 dataset_type = "VideoDataset"
 file_client_args = dict(io_backend='disk')
 
@@ -92,8 +92,8 @@ test_pipeline = [
 
 # data loaders
 train_dataloader = dict(
-    batch_size=2,  # 3D model needs smaller batch; adjust based on GPU memory
-    num_workers=4,
+    batch_size=1,  # reduced for CPU training
+    num_workers=2,  # reduced for CPU
     persistent_workers=True,
     sampler=dict(type='DefaultSampler', shuffle=True),
     dataset=dict(
@@ -103,8 +103,8 @@ train_dataloader = dict(
         pipeline=train_pipeline))
 
 val_dataloader = dict(
-    batch_size=2,
-    num_workers=4,
+    batch_size=1,  # reduced for CPU training
+    num_workers=2,  # reduced for CPU
     persistent_workers=True,
     sampler=dict(type='DefaultSampler', shuffle=False),
     dataset=dict(
@@ -115,8 +115,8 @@ val_dataloader = dict(
         test_mode=True))
 
 test_dataloader = dict(
-    batch_size=1,  # Single batch for testing
-    num_workers=4,
+    batch_size=1,
+    num_workers=2,  # reduced for CPU
     persistent_workers=True,
     sampler=dict(type='DefaultSampler', shuffle=False),
     dataset=dict(
@@ -133,12 +133,12 @@ test_evaluator = dict(type='AccMetric')
 # optimizer
 optim_wrapper = dict(
     type='OptimWrapper',
-    accumulative_counts=4,  # effective batch_size = 2 * 4 = 8
+    accumulative_counts=8,  # accumulation to simulate larger batch (1 * 8 = 8 effective batch size)
     optimizer=dict(
         type='AdamW',
-        lr=5e-5,  # lower learning rate for small batch
+        lr=1e-5,  # Rreduced LR for CPU training
         betas=(0.9, 0.999),
-        weight_decay=0.05),
+        weight_decay=0.01),  # Reduced weight decay
     paramwise_cfg=dict(
         custom_keys={
             'backbone': dict(lr_mult=0.1),  # lower LR for pretrained backbone
@@ -155,22 +155,22 @@ param_scheduler = [
         start_factor=0.1,
         by_epoch=True,
         begin=0,
-        end=5),
+        end=2),
     dict(
         type='CosineAnnealingLR',
-        T_max=25,
-        eta_min=1e-6,
+        T_max=13, 
+        eta_min=1e-7,
         by_epoch=True,
-        begin=5,
-        end=30)
+        begin=2,
+        end=15)
 ]
 
 # configurations
 train_cfg = dict(
     type='EpochBasedTrainLoop',
-    max_epochs=30,
+    max_epochs=15,  # reduced epochs for CPU training
     val_begin=1,
-    val_interval=1)
+    val_interval=2)  # validate every 2 epochs to save time
 
 val_cfg = dict(type='ValLoop')
 test_cfg = dict(type='TestLoop')
@@ -179,13 +179,13 @@ test_cfg = dict(type='TestLoop')
 default_hooks = dict(
     runtime_info=dict(type='RuntimeInfoHook'),
     timer=dict(type='IterTimerHook'),
-    logger=dict(type='LoggerHook', interval=10, ignore_last=False),
+    logger=dict(type='LoggerHook', interval=20, ignore_last=False),  #lLog less frequently
     param_scheduler=dict(type='ParamSchedulerHook'),
     checkpoint=dict(
         type='CheckpointHook',
-        interval=5,
+        interval=3,  # save checkpoints every 3 epochs
         save_best='auto',
-        max_keep_ckpts=3),
+        max_keep_ckpts=2),  # keep fewer checkpoints to save disk space
     sampler_seed=dict(type='DistSamplerSeedHook'),
     sync_buffers=dict(type='SyncBuffersHook'))
 
