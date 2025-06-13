@@ -1,8 +1,9 @@
 # data files/settings
-file_train_labels = "mmaction2/MultiSubjects_train_val_test/MultiSubjects_train_val_test/labels_train.txt"
-file_val_labels = "mmaction2/MultiSubjects_train_val_test/MultiSubjects_train_val_test/labels_val.txt"
-data_root_train = "mmaction2/MultiSubjects_train_val_test/MultiSubjects_train_val_test/videos_train"
-data_root_val = "mmaction2/MultiSubjects_train_val_test/MultiSubjects_train_val_test/videos_val"
+file_train_labels = "data/MultiSubjects/train_list.txt"
+file_val_labels = "data/MultiSubjects/val_list.txt"
+file_test_labels = "data/MultiSubjects/test_list.txt"
+data_root_train = "data/MultiSubjects/videos"
+data_root_val = "data/MultiSubjects/videos"
 dataset_type = "VideoDataset"
 file_client_args = dict(io_backend='disk')
 
@@ -69,6 +70,9 @@ val_pipeline = [
     dict(type='DecordDecode'),
     dict(type='Resize', scale=(-1, 256)),
     dict(type='CenterCrop', crop_size=224),
+    dict(type='Normalize', **dict(
+        mean=[123.675, 116.28, 103.53],
+        std=[58.395, 57.12, 57.375])),
     dict(type='FormatShape', input_format='NCTHW'),
     dict(type='PackActionInputs')
 ]
@@ -79,6 +83,9 @@ test_pipeline = [
     dict(type='DecordDecode'),
     dict(type='Resize', scale=(-1, 256)),
     dict(type='ThreeCrop', crop_size=224),
+    dict(type='Normalize', **dict(
+        mean=[123.675, 116.28, 103.53],
+        std=[58.395, 57.12, 57.375])),
     dict(type='FormatShape', input_format='NCTHW'),
     dict(type='PackActionInputs')
 ]
@@ -114,7 +121,7 @@ test_dataloader = dict(
     sampler=dict(type='DefaultSampler', shuffle=False),
     dataset=dict(
         type=dataset_type,
-        ann_file=file_val_labels,
+        ann_file=file_test_labels,
         data_prefix=dict(video=data_root_val),
         pipeline=test_pipeline,
         test_mode=True))
@@ -148,7 +155,7 @@ param_scheduler = [
         start_factor=0.1,
         by_epoch=True,
         begin=0,
-        end=5),  # Warm up for 5 epochs
+        end=5),
     dict(
         type='CosineAnnealingLR',
         T_max=25,
@@ -199,7 +206,7 @@ auto_scale_lr = dict(batch_size=2, enable=False)
 log_processor = dict(by_epoch=True, type='LogProcessor', window_size=20)
 log_level = 'INFO'
 
-load_from = "./checkpoints/swin_base_patch244_window877_kinetics400_22k.pth" # pretrained model
+load_from = "https://download.openmmlab.com/mmaction/v1.0/recognition/swin/swin_base_patch244_window877_kinetics400_22k.pth" # pretrained model
 
 resume = False
 
