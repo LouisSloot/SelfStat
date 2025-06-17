@@ -11,6 +11,7 @@ import os
 from tqdm import tqdm
 import argparse
 import json
+import random
 
 
 class BasketballDataset(Dataset):
@@ -78,10 +79,47 @@ class BasketballDataset(Dataset):
         frames = frames.permute(3, 0, 1, 2)  # C, T, H, W
         
         return frames
+    
+    def augment_video(self, video):
+
+        C, T, H, W = video.shape
+
+        # horizontal flip
+        if random.random() < 0.5:
+            video = torch.flip(video, dims = [3])
+
+        # crop video
+        if random.random() < 0.7:
+            # crop between 80-100% of original
+            crop_ratio = random.uniform(0.8, 1.0)
+            new_h = int(H * crop_ratio)
+            new_w = int(W * crop_ratio)
+            
+            # random crop position
+            top = random.randint(0, H - new_h)
+            left = random.randint(0, W - new_w)
+
+            new_top = top + new_h
+            new_left = left + new_w
+            
+            video = video[:, :, top:new_top, left:new_left]
+            
+            # resize back to original
+            video = torch.nn.functional.interpolate(
+                video.unsqueeze(0), size=(H, W), mode='bilinear', align_corners=False
+            ).squeeze(0)
+        
+        # mess with brightness and contrast
+        if random.random() < 0.5:
+            brightness_factor = random.uniform(0.8, 1.2)
+            video = video * brightness_factor
+            video = torch.clamp(video, 0, 255)
+        
+        return video
 
 class VideoTransform:
     
-    def __init__(self, size=(224, 224), mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]):
+    def __init__(self, size=(112, 112), mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]): # smaller size for faster training
         self.size = size
         self.mean = torch.tensor(mean).view(3, 1, 1, 1)
         self.std = torch.tensor(std).view(3, 1, 1, 1)
@@ -262,8 +300,11 @@ def main():
     model = Simplified3DCNN(num_classes = 3, dropout_rate = args.dropout).to(device)
     
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.AdamW(model.parameters(), lr = args.lr, 
-                            weight_decay = 0.01)
+    optimizer = optim.AdamW(
+        model.parameters(), 
+        lr=args.lr,
+        weight_decay=args.weight_decay
+    )
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', 
                                                      factor = 0.5, 
                                                      patience = 3)
