@@ -298,6 +298,11 @@ def main():
     )
     
     model = Simplified3DCNN(num_classes = 3, dropout_rate = args.dropout).to(device)
+
+    total_params = sum(p.numel() for p in model.parameters())
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"Total parameters: {total_params:,}")
+    print(f"Trainable parameters: {trainable_params:,}")
     
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.AdamW(
@@ -336,6 +341,10 @@ def main():
         print(f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}%")
         print(f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%")
         print(f"Learning Rate: {scheduler.get_last_lr()[0]:.6f}")
+
+         # overfitting gap
+        acc_gap = train_acc - val_acc
+        print(f"Overfitting gap: {acc_gap:.2f}% (lower is better)")
         
         if val_acc > best_acc:
             best_acc = val_acc
@@ -365,8 +374,17 @@ def main():
         'best_accuracy': best_acc,
         'final_train_acc': train_history[-1]['acc'],
         'final_val_acc': val_history[-1]['acc'],
+        'final_overfitting_gap': train_history[-1]['acc'] - val_history[-1]['acc'],
         'train_history': train_history,
-        'val_history': val_history
+        'val_history': val_history,
+        'model_parameters': trainable_params,
+        'training_config': {
+            'learning_rate': args.lr,
+            'weight_decay': args.weight_decay,
+            'dropout': args.dropout,
+            'input_size': '112x112',
+            'clip_length': 16
+        }
     }
     
     with open(work_dir / 'training_results.json', 'w') as f:
