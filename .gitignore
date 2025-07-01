@@ -1,6 +1,4 @@
 # custom
-/data_dir/
-/work_dirs/
 
 # Pytorch
 *.pth
