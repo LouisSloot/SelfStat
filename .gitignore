@@ -1,4 +1,5 @@
 # custom
+data_dir/train_val_test
 
 # Pytorch
 *.pth
