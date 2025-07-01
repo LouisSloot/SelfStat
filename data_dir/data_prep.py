@@ -79,6 +79,35 @@ class VideoDataset(Dataset):
             video = video * brightness_factor
             video = torch.clamp(video, 0, 255)
 
+
+### Transform class essentially used as a function to preprocess videos
+class VideoTransform():
+    def __init__(self, size = (112, 112), mean = [0.485, 0.456, 0.406], 
+                 std = [0.229, 0.224, 0.225]): # ImageNet standard values
+        self.size = size
+        self.mean = torch.tensor(mean).view(3, 1, 1, 1)
+        self.std = torch.tensor(std).view(3, 1, 1, 1)
+
+    def __call__(self, video):
+        C, T, H, W = video.shape
+
+        video = video.permute(1, 0, 2, 3) # put T in first index (T,C,H,W)
+        resized_frames = []
+
+        # loop over and resize frames
+        for i in range(T):
+            frame = video[i] # in C,H,W format
+            frame = transforms.functional.resize(frame, self.size)
+            resized_frames.append(frame)
+
+        video = torch.stack(resized_frames)
+        video = video.permute(1, 0, 2, 3)
+
+        video = video / 255.0
+        video = (video - self.mean) / self.std
+
+        return video
+
     
 def video_label_from_name(video_name):
     # video_name should be as appears in annotation file
