@@ -65,7 +65,19 @@ class VideoDataset(Dataset):
         return video, video_class
 
     def augment_video(self, video):
-        pass
+        ### Artificially modifying videos to diversify dataset
+
+        C, T, H, W = video.shape
+
+        # horizontal flip
+        if random.random() < 0.5:
+            video = torch.flip(video, dims = [3])
+
+        # brightness and contrast
+        if random.random() < 0.5:
+            brightness_factor = random.uniform(0.8, 1.2)
+            video = video * brightness_factor
+            video = torch.clamp(video, 0, 255)
 
     
 def video_label_from_name(video_name):
