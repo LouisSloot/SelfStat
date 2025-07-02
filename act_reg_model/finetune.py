@@ -12,5 +12,3 @@ from tqdm import tqdm
 import argparse
 import json
 import random
-
-
