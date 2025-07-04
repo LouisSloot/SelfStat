@@ -21,9 +21,45 @@ def train(model, train_loader, val_loader, device, epochs = 10, lr = 1e-5):
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr = lr)
     
+    train_history = []
+    val_history = []
+    best_acc = 0
+
     for epoch in range(epochs):
-        print(f'Beginning epoch {epoch}/{epochs}:')
+        print(f'Beginning epoch {epoch+1}/{epochs}:')
         print('-' * 20)
+
+        train_acc, train_loss = train_epoch(model, train_loader, criterion, 
+                                            optimizer, device)
+        val_acc, val_loss = val_epoch(model, val_loader, criterion, device)
+
+def train_epoch(model, train_loader, criterion, optimizer, device):
+    model.train()
+    curr_loss = 0.0
+    correct = 0
+    total = 0
+
+    for input, label in train_loader:
+        input, label = input.to(device), label.to(device)
+        output = model(input)
+        loss = criterion(output, label)
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        curr_loss += loss.item()
+        _, label_guess = torch.max(output, 1) # top-1 accuracy
+        total += label.size(0)
+        correct_tensor = (label_guess == label)
+        correct += correct_tensor.sum().item()
+    
+    acc = 100 * correct / total
+    return acc, curr_loss
+
+
+def val_epoch(model, val_loader, criterion, device):
+    pass
 
 def load_model(num_classes): # will try to add more stats (classes) over time
     model = r2plus1d_18(pretrained = True)
