@@ -38,7 +38,8 @@ class VideoDataset(Dataset):
         full_path = f'{self.data_root}/{sub_dir}/{video_name}'
 
         video, _, _ = read_video(full_path, pts_unit = "sec", 
-                                 output_format = "CTHW")
+                                 output_format = "THWC")
+        video = video.permute(3, 0, 1, 2)  # [T, H, W, C] -> [C, T, H, W]
         
         # trim/pad video to the correct number of frames
         if video.shape[1] > self.clip_frames:
@@ -56,6 +57,7 @@ class VideoDataset(Dataset):
 
     def augment_video(self, video):
         ### Artificially modifying videos to diversify dataset
+        # -- CURRENTLY UNUSED -- 
 
         C, T, H, W = video.shape
 
@@ -81,18 +83,18 @@ class VideoTransform():
     def __call__(self, video):
         C, T, H, W = video.shape
 
-        video = video.permute(1, 0, 2, 3) # put T in first index (T,C,H,W)
+        video = video.permute(1, 0, 2, 3) # put T in first index: [T, C, H, W]
         resized_frames = []
 
         # loop over and resize frames
         for i in range(T):
-            frame = video[i] # in C,H,W format
+            frame = video[i] # in [C, H, W] format
             frame = transforms.functional.resize(frame, self.size)
             resized_frames.append(frame)
 
         video = torch.stack(resized_frames)
         video = video.permute(1, 0, 2, 3)
-        ### Permutation matrices are their own inverse :D ^^
+        ### Permutation matrices are their own inverse :D ^^ (see line 85)
 
         video = video / 255.0
         video = (video - self.mean) / self.std
