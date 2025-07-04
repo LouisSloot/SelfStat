@@ -2,17 +2,8 @@ import torch
 import torch.nn as nn
 from torchvision.models.video import r2plus1d_18
 import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader
-import torchvision.transforms as transforms
-from torchvision.models.video import r3d_18
-import cv2
-import numpy as np
-from pathlib import Path
-import os
+from torch.utils.data import DataLoader
 from tqdm import tqdm
-import argparse
-import json
-import random
 from data_prep import VideoDataset, VideoTransform
 
 
