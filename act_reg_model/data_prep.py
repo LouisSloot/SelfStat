@@ -1,17 +1,7 @@
 import torch
-import torch.nn as nn
-import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset
 import torchvision.transforms as transforms
-from torchvision.models.video import r3d_18
 from torchvision.io import read_video
-import cv2
-import numpy as np
-from pathlib import Path
-import os
-from tqdm import tqdm
-import argparse
-import json
 import random
 
 # I use "label" to mean "dribble", "layup", or "shoot"
@@ -102,7 +92,7 @@ class VideoTransform():
 
         video = torch.stack(resized_frames)
         video = video.permute(1, 0, 2, 3)
-        ### Self Inverse :D ^^
+        ### Permutation matrices are their own inverse :D ^^
 
         video = video / 255.0
         video = (video - self.mean) / self.std
