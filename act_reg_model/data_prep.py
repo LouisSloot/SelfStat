@@ -47,7 +47,7 @@ class VideoDataset(Dataset):
             video = video[:, start:start + self.clip_frames, :, :]
 
         elif video.shape[1] < self.clip_frames:
-            pad = self.frames_per_clip - video.shape[1]
+            pad = self.clip_frames - video.shape[1]
             video = torch.nn.functional.pad(video, (0, 0, 0, 0, 0, pad))
         
         if self.transform: # will always be true (in this script at least)
