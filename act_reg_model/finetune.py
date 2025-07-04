@@ -21,8 +21,6 @@ def train(model, train_loader, val_loader, device, epochs = 10, lr = 1e-5):
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr = lr)
     
-    train_history = []
-    val_history = []
     best_acc = 0
 
     for epoch in range(epochs):
@@ -32,6 +30,21 @@ def train(model, train_loader, val_loader, device, epochs = 10, lr = 1e-5):
         train_acc, train_loss = train_epoch(model, train_loader, criterion, 
                                             optimizer, device)
         val_acc, val_loss = val_epoch(model, val_loader, criterion, device)
+
+        print(f"Train accuracy: {train_acc:.2f}%, Train loss: {train_loss:.2f}")
+        print(f"Val accuracy: {val_acc:.2f}%, Val loss: {val_loss:.2f}")
+
+        if val_acc > best_acc:
+            best_acc = val_acc
+            torch.save(
+            {
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'best_acc': best_acc
+            }, 
+            './best_models/best_model.pth')
+            print(f"New best model -- Accuracy: {best_acc:.2f}%")
 
 def train_epoch(model, train_loader, criterion, optimizer, device):
     model.train()
@@ -84,3 +97,9 @@ def load_model(num_classes): # will try to add more stats (classes) over time
     model = r2plus1d_18(pretrained = True)
     model.fc = nn.Linear(model.fc.in_features, num_classes)
     return model
+
+def main():
+    return
+
+if __name__ == '__main__':
+    main()
