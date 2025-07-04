@@ -93,13 +93,50 @@ def val_epoch(model, val_loader, criterion, device):
     return acc, curr_loss
 
 
-def load_model(num_classes): # will try to add more stats (classes) over time
+def load_model(num_classes = 3): # will try to add more stats (classes) over time
     model = r2plus1d_18(pretrained = True)
     model.fc = nn.Linear(model.fc.in_features, num_classes)
     return model
 
 def main():
-    return
+    model = load_model(num_classes = 3) # classes: dribble, layup, shoot
+    device = torch.device("mps" if torch.backends.mps.is_available() 
+                          else "cuda" if torch.cuda.is_available() else "cpu")
+    transform = VideoTransform()
+
+    train_ds = VideoDataset(
+        annotation_file = "../data_dir/train_val_test/train.txt",
+        data_root = "../../data_dir/train_val_test/train",
+        split = "train",
+        clip_frames = 63,
+        transform = transform
+                            )
+    
+    val_ds = VideoDataset(
+        annotation_file = "../data_dir/train_val_test/val.txt",
+        data_root = "../../data_dir/train_val_test/val",
+        split = "val",
+        clip_frames = 63,
+        transform = transform
+                            )
+    
+    train_loader = DataLoader(
+        dataset = train_ds, 
+        batch_size = 2,
+        num_workers = 2,
+        shuffle = False,
+        pin_memory = False
+        )
+    
+    val_loader = DataLoader(
+        dataset = val_ds, 
+        batch_size = 2,
+        num_workers = 2,
+        shuffle = False,
+        pin_memory = False
+        )
+
+    train(model, train_loader, val_loader, device, epochs=20, lr=1e-5)
 
 if __name__ == '__main__':
     main()
