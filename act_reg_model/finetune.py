@@ -59,7 +59,26 @@ def train_epoch(model, train_loader, criterion, optimizer, device):
 
 
 def val_epoch(model, val_loader, criterion, device):
-    pass
+    model.eval()
+    curr_loss = 0.0
+    correct = 0
+    total = 0
+
+    with torch.no_grad():
+        for input, label in val_loader:
+            input, label = input.to(device), label.to(device)
+            output = model(input)
+            loss = criterion(output)
+
+            curr_loss += loss.item()
+            _, label_guess = torch.max(output, 1)
+            total += label.size(0)
+            correct_tensor = (label_guess == label)
+            correct += correct_tensor.sum().item()
+    
+    acc = 100 * correct / total
+    return acc, curr_loss
+
 
 def load_model(num_classes): # will try to add more stats (classes) over time
     model = r2plus1d_18(pretrained = True)
