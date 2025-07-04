@@ -22,8 +22,8 @@ def train(model, train_loader, val_loader, device, epochs = 10, lr = 1e-5):
                                             optimizer, device)
         val_acc, val_loss = val_epoch(model, val_loader, criterion, device)
 
-        print(f"Train accuracy: {train_acc:.2f}%, Train loss: {train_loss:.2f}")
-        print(f"Val accuracy: {val_acc:.2f}%, Val loss: {val_loss:.2f}")
+        print(f"Train accuracy: {train_acc:.2f}%, Train loss: {train_loss:.4f}")
+        print(f"Val accuracy: {val_acc:.2f}%, Val loss: {val_loss:.4f}")
 
         if val_acc > best_acc:
             best_acc = val_acc
@@ -40,10 +40,13 @@ def train(model, train_loader, val_loader, device, epochs = 10, lr = 1e-5):
 def train_epoch(model, train_loader, criterion, optimizer, device):
     model.train()
     curr_loss = 0.0
+    curr_acc = 0.0
     correct = 0
     total = 0
 
-    for input, label in train_loader:
+    pbar = tqdm(train_loader, desc = "Training", leave = False)
+
+    for input, label in pbar:
         input, label = input.to(device), label.to(device)
         output = model(input)
         loss = criterion(output, label)
@@ -57,31 +60,44 @@ def train_epoch(model, train_loader, criterion, optimizer, device):
         total += label.size(0)
         correct_tensor = (label_guess == label)
         correct += correct_tensor.sum().item()
+        curr_acc = 100 * correct / total
+
+        pbar.set_postfix({
+            'Loss': f'{curr_loss/total:.4f}', 
+            'Acc': f'{curr_acc:.2f}%'
+        })
     
-    acc = 100 * correct / total
-    return acc, curr_loss
+    return curr_acc, curr_loss / total # avg loss over samples
 
 
 def val_epoch(model, val_loader, criterion, device):
     model.eval()
     curr_loss = 0.0
+    curr_acc = 0.0
     correct = 0
     total = 0
 
+    pbar = tqdm(val_loader, desc = "Validation", leave = False)
+
     with torch.no_grad():
-        for input, label in val_loader:
+        for input, label in pbar:
             input, label = input.to(device), label.to(device)
             output = model(input)
-            loss = criterion(output)
+            loss = criterion(output, label)
 
             curr_loss += loss.item()
             _, label_guess = torch.max(output, 1)
             total += label.size(0)
             correct_tensor = (label_guess == label)
             correct += correct_tensor.sum().item()
+            curr_acc = 100 * correct / total
+
+            pbar.set_postfix({
+                'Loss': f'{curr_loss/total:.4f}', 
+                'Acc': f'{curr_acc:.2f}%'
+            })
     
-    acc = 100 * correct / total
-    return acc, curr_loss
+    return curr_acc, curr_loss / total
 
 
 def load_model(num_classes = 3): # will try to add more stats (classes) over time
