@@ -72,7 +72,7 @@ class VideoDataset(Dataset):
 
 ### Transform class essentially used as a function to preprocess videos
 class VideoTransform():
-    def __init__(self, size = (112, 112), mean = [0.485, 0.456, 0.406], 
+    def __init__(self, size = (224, 224), mean = [0.485, 0.456, 0.406], 
                  std = [0.229, 0.224, 0.225]): # ImageNet standard values
         self.size = size
         self.mean = torch.tensor(mean).view(3, 1, 1, 1)
