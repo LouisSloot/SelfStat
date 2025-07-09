@@ -1,5 +1,12 @@
 # custom
 data_dir/train_val_test
+data_dir/raw_games
 
 # Pytorch
 *.pth
+
+# YOLO
+*.pt
+
+*.pyc
+*__pycache__/
