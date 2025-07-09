@@ -7,10 +7,12 @@ def find_nearest_player(ball_box, person_boxes):
     """ Used to find the player currently in possession of the basketball.
         Returns None if no player appears to have possession (loose ball).
         Current naive approach relies solely on IoU. """
+    if not ball_box: return None
     best_IOU = 0
     best_person = None
     for person_box in person_boxes:
-        curr_IOU = findIOU(ball_box, person_box)
+        curr_IOU = findIOU(ball_box.xyxy.tolist()[0], 
+                           person_box.xyxy.tolist()[0])
         if curr_IOU > best_IOU:
             best_IOU, best_person = curr_IOU, person_box
     return best_person
@@ -34,14 +36,22 @@ def findIOU(xyxy1, xyxy2):
 class FrameRecord():
     """ Data structure used to store metadata for each frame. """
     frame_idx = 1
-    def __init__(self, ball_box, person_boxes):
+    def __init__(self, result):
+        boxes = result.boxes
+        person_mask = [result.names[cls.item()] == "person" for cls in 
+                       boxes.cls]
+        ball_mask = [result.names[cls.item()] == "sports ball" for cls in 
+                     boxes.cls]
+        self.ball_box = boxes[ball_mask]
+        self.person_boxes = boxes[person_mask]
+
         self.frame_idx = FrameRecord.frame_idx
         FrameRecord.frame_idx += 1
-        self.ball_box, self.ball_in_frame = (ball_box, True if ball_box else 
-                                             None, False)
-        self.person_boxes = person_boxes
-        self.player_possession = find_nearest_player(ball_box, person_boxes)
-        self.team_possession = player_team_map[self.player_possession]
+        # self.ball_box, self.ball_in_frame = (ball_box, True if ball_box else 
+                                            #  None, False)
+        self.player_possession = find_nearest_player(self.ball_box, 
+                                                     self.person_boxes)
+        self.team_possession = player_team_map.get(self.player_possession, None)
 
 model = YOLO("./yolo11m.pt")
 
@@ -53,19 +63,10 @@ keep_classes = {"sports ball", "person"}
 
 for frame_num, result in enumerate(results):
 
-    if frame_num > 5: break
+    if frame_num > 40: break
 
-    boxes = result.boxes
-    if not boxes: continue
-    person_mask = [result.names[cls.item()] == "person" for cls in boxes.cls]
-    ball_mask = [result.names[cls.item()] == "sports ball" for cls in boxes.cls]
-    ball_box = boxes[ball_mask]
-    person_boxes = boxes[person_mask]
+    record = FrameRecord(result)
 
-    possession_box = find_nearest_player(ball_box, person_boxes)
-
-    result.boxes = possession_box # determines which box(es) to draw
-
-    ball_coords = ball_box.xyxy.tolist() # [[x, y, x, y]]
+    result.boxes = record.player_possession # determine which box(es) to draw
 
     result.show()  # display to screen
