@@ -1,4 +1,15 @@
 from ultralytics import YOLO
+import cv2
+
+### Needed to use roboflow model for basketball recognition
+from inference_sdk import InferenceHTTPClient
+import supervision as sv
+
+CLIENT = InferenceHTTPClient(
+    api_url="https://serverless.roboflow.com",
+    api_key="zYBaqHuPPOScwarjQx8t" # free auto-generated api key from roboflow
+)
+###
 
 player_team_map = {1: "A", 2: "A", 3: "A", 
                    4: "B", 5: "B", 6: "B"}
@@ -63,18 +74,49 @@ records = []
 
 model = YOLO("./yolo11m.pt")
 
-src = "./data_dir/raw_games/game_2.mp4"
+src_root = "./data_dir/raw_games/"
+src_file = "game_2_30s.MP4"
+path = src_root + src_file
 
-results = model.predict(src, stream = True, conf = 0.4, verbose = False)
+results = model.track(path, stream = True, conf = 0.4, verbose = False)
 
-for frame_num, result in enumerate(results):
+cap = cv2.VideoCapture(path)
+footage_fps = cap.get(cv2.CAP_PROP_FPS)
+frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+cap.release()
 
-    if frame_num > 40: break
+fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+out = cv2.VideoWriter(f"./annotated_replays/labeled_{src_file}", 
+                      fourcc = fourcc, fps = footage_fps, 
+                      frameSize = (frame_width, frame_height))
 
-    record = FrameRecord(result)
+for result in results:
+    img = result.orig_img
+    result_basketball = CLIENT.infer(img,
+                                  model_id="basketball-player-detection-v8kcy/6")
+    detections = sv.Detections.from_inference(result_basketball)
+    bounding_box_annotator = sv.BoxAnnotator()
+    label_annotator = sv.LabelAnnotator()   
+    annotated_image = bounding_box_annotator.annotate(scene = img, 
+                                                      detections = detections)
+    annotated_image = label_annotator.annotate(scene = annotated_image, 
+                                               detections = detections)
+    out.write(annotated_image)
+    # frame = result.plot()
+    # out.write(frame)
+    
 
-    records.append(record)
+out.release()
 
-    result.boxes = record.ball_box # determine which box(es) to draw
+# for frame_num, result in enumerate(results):
 
-    result.show()  # display to screen
+#     if frame_num > 10: break
+
+#     record = FrameRecord(result)
+
+#     records.append(record)
+
+#     # result.boxes = record.player_possession # determine which box(es) to draw
+
+#     result.show()  # display to screen
