@@ -71,54 +71,73 @@ class FrameRecord():
         self.frame_idx = FrameRecord.frame_idx
         FrameRecord.frame_idx += 1
 
-records = []
-
-model = YOLO("./yolo12n.pt")
-
-src_root = "./data_dir/raw_games/"
-src_file = "game_2_30s.MP4"
-path = src_root + src_file
-
-results = model.track(path, stream = True, conf = 0.4, verbose = False)
-
 ### Write out annotated frames to a video for me to watch back for testing
-cap = cv2.VideoCapture(path)
-footage_fps = cap.get(cv2.CAP_PROP_FPS)
-frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-cap.release()
+def get_frame_info(src):
+    cap = cv2.VideoCapture(src)
+    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    cap.release()
+    return w, h, fps
 
-fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-out = cv2.VideoWriter(f"./annotated_replays/labeled_{src_file}", 
-                      fourcc = fourcc, fps = footage_fps, 
+def track_basketball(result):
+    img = result.orig_img
+    result_basketball = CLIENT.infer(img,
+                                model_id="basketball-player-detection-v8kcy/6")
+    detections = sv.Detections.from_inference(result_basketball)
+    bounding_box_annotator = sv.BoxAnnotator()
+    label_annotator = sv.LabelAnnotator()   
+    annotated_frame = bounding_box_annotator.annotate(scene = img, 
+                                                    detections = detections)
+    annotated_frame = label_annotator.annotate(scene = annotated_frame, 
+                                            detections = detections)
+    return annotated_frame
+    
+def track_people(result, records):
+    record = FrameRecord(result)
+    records.append(record)
+    result.boxes = record.player_possession
+    annotated_frame = result.plot()
+    return annotated_frame
+
+def create_annotated_replay(src, src_file, results, records, TRACKING_BASKETBALL,
+                            TRACKING_PEOPLE):
+    frame_width, frame_height, vid_fps = get_frame_info(src)
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    out = cv2.VideoWriter(f"./annotated_replays/labeled_{src_file}", 
+                      fourcc = fourcc, fps = vid_fps, 
                       frameSize = (frame_width, frame_height))
 
+    for frame_num, result in enumerate(results):
 
-TRACKING_BASKETBALL = False
-TRACKING_PEOPLE = True
+        if TRACKING_BASKETBALL: 
+            annotated_frame = track_basketball(result)
 
-for frame_num, result in enumerate(results):
+        elif TRACKING_PEOPLE:
+            annotated_frame = track_people(result, records)
+            
+        out.write(annotated_frame)
 
-    if TRACKING_BASKETBALL: 
-        img = result.orig_img
-        result_basketball = CLIENT.infer(img,
-                                      model_id="basketball-player-detection-v8kcy/6")
-        detections = sv.Detections.from_inference(result_basketball)
-        bounding_box_annotator = sv.BoxAnnotator()
-        label_annotator = sv.LabelAnnotator()   
-        annotated_image = bounding_box_annotator.annotate(scene = img, 
-                                                          detections = detections)
-        annotated_image = label_annotator.annotate(scene = annotated_image, 
-                                                   detections = detections)
-        out.write(annotated_image)
+    out.release()
 
-    elif TRACKING_PEOPLE:
-        record = FrameRecord(result)
-        records.append(record)
-        result.boxes = record.player_possession
+def main():
+    records = []
 
-        frame = result.plot()
-        out.write(frame)
+    model = YOLO("./yolo12n.pt")
+
+    src_root = "./data_dir/raw_games/"
+    src_file = "game_2_30s.MP4"
+    src = src_root + src_file
+
+    id_to_emb = get_manual_ids(model, src, 765) # again, 765 is a magic frame for testing
+
+    results = model.track(src, stream = True, conf = 0.4, verbose = False)
+
+    TRACKING_BASKETBALL = False # used for essentially conditional compilation during development 
+    TRACKING_PEOPLE = True
     
+    create_annotated_replay(src, src_file, results, records, 
+                            TRACKING_BASKETBALL, TRACKING_PEOPLE)
 
-out.release()
+if __name__ == '__main__':
+    main()
