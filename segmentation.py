@@ -1,9 +1,12 @@
 from ultralytics import YOLO
 import cv2
-from label_players import get_manual_ids, crop_frame, extract_embedding
+import torch
+import time
 import torch.nn.functional as functional
+from torchvision import models, transforms
+from label_players import get_manual_ids, crop_frame, extract_embedding, get_frame_from_vid, get_corners
 
-### Needed to use roboflow model for basketball recognition
+### Need for roboflow model basketball recognition
 from inference_sdk import InferenceHTTPClient
 import supervision as sv
 
@@ -15,6 +18,21 @@ CLIENT = InferenceHTTPClient(
 
 player_team_map = {1: "A", 2: "A", 3: "A", 
                    4: "B", 5: "B", 6: "B"}
+
+def get_transform():
+    transform = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize([0.485, 0.456, 0.406],
+                            [0.229, 0.224, 0.225])
+    ])
+    return transform
+
+def get_resnet():
+    resnet = models.resnet18(weights = models.ResNet18_Weights.DEFAULT)
+    resnet.fc = torch.nn.Identity()
+    resnet.eval()
+    return resnet
 
 def ball_found(ball_box):
     """ Determines whether or not there is a bounding box to be drawn for 
@@ -72,7 +90,6 @@ class FrameRecord():
         self.frame_idx = FrameRecord.frame_idx
         FrameRecord.frame_idx += 1
 
-### Write out annotated frames to a video for me to watch back for testing
 def get_frame_info(src):
     cap = cv2.VideoCapture(src)
     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -81,9 +98,9 @@ def get_frame_info(src):
     cap.release()
     return w, h, fps
 
-def id_from_emb(id_to_emb, box, frame, conf = 0.75):
+def id_from_emb(id_to_emb, box, frame, resnet, transform, conf = 0.75):
     crop = crop_frame(box, frame)
-    emb = extract_embedding(crop)
+    emb = extract_embedding(crop, resnet, transform)
 
     best_id = None
     best_sim = -1
@@ -95,7 +112,12 @@ def id_from_emb(id_to_emb, box, frame, conf = 0.75):
     
     return best_id
 
-
+def draw_id_boxes(frame, tracked_ids):
+    for box, id in tracked_ids:
+        x1, y1, x2, y2 = get_corners(box)
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        cv2.putText(frame, f"ID: {id}", (x1, y1 - 10),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)    
 
 def track_basketball(result):
     ### Roboflow model
@@ -111,54 +133,80 @@ def track_basketball(result):
                                             detections = detections)
     return annotated_frame
     
-def track_people(result, records):
+def track_people(frame, result, records, id_to_emb, resnet, transform):
     ### YOLO model
-    # TODO: Integrate id_to_emb here using cos similarity
     record = FrameRecord(result)
     records.append(record)
-    # result.boxes = record.player_possession
-    annotated_frame = result.plot()
+
+    annotated_frame = result.plot() # draw initial boxes w/ YOLO ids
+
+    tracked_ids = []
+    for box in record.person_boxes:
+        new_id = id_from_emb(id_to_emb, box, frame, resnet, transform, 
+                             conf = 0.75)
+
+        if new_id:
+            tracked_ids.append((box, new_id))
+
+    annotated_frame = draw_id_boxes(annotated_frame, tracked_ids)
     return annotated_frame
 
-def create_annotated_replay(src, src_file, results, records, TRACKING_BASKETBALL,
-                            TRACKING_PEOPLE):
+def create_annotated_replay(src, results, records, id_to_emb, resnet, transform):
+    global TRACKING_BASKETBALL
+    global TRACKING_PEOPLE
+
+    print(f"Creating annotated replay at: {src}")
     frame_width, frame_height, vid_fps = get_frame_info(src)
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    fourcc = cv2.VideoWriter_fourcc(*"avc1")
+    src_file = src.split('/')[-1]
     out = cv2.VideoWriter(f"./annotated_replays/labeled_{src_file}", 
                       fourcc = fourcc, fps = vid_fps, 
                       frameSize = (frame_width, frame_height))
-
+    
     for frame_num, result in enumerate(results):
+        if frame_num % 100 == 0: 
+            print(f"Analyzing frame: {frame_num} ")
+
+        frame = get_frame_from_vid(src, frame_num)
 
         if TRACKING_BASKETBALL: 
             annotated_frame = track_basketball(result)
 
         elif TRACKING_PEOPLE:
-            annotated_frame = track_people(result, records)
+            annotated_frame = track_people(frame, result, records, id_to_emb,
+                                           resnet, transform)
             
         out.write(annotated_frame)
 
     out.release()
 
+def get_frame_count(src):
+
+    cap = cv2.VideoCapture(src)
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    cap.release()
+    return frame_count
+
 def main():
     records = []
 
-    model = YOLO("./yolo12n.pt")
+    model = YOLO("./YOLO/yolo12n.pt")
+    transform = get_transform()
+    resnet = get_resnet()
 
-    src_root = "./data_dir/raw_games/"
-    src_file = "game_2_30s.MP4"
-    src = src_root + src_file
+    src = "./data_dir/raw_games/game_2_15s.MP4"
+    
+    frame_count = get_frame_count(src)
+    print(f"There are {frame_count} frames in {src}.")
 
-    id_to_emb = get_manual_ids(model, src, 765) # again, 765 is a magic frame for testing
+    id_to_emb = get_manual_ids(model, resnet, transform, src, 45)
 
     results = model.track(src, stream = True, conf = 0.4, verbose = False)
-
-    ### Used for conditional compilation during development 
-    TRACKING_BASKETBALL = False 
-    TRACKING_PEOPLE = True
     
-    create_annotated_replay(src, src_file, results, records, 
-                            TRACKING_BASKETBALL, TRACKING_PEOPLE)
+    create_annotated_replay(src, results, records, id_to_emb, resnet, transform)
 
+### Used for conditional compilation during development 
+TRACKING_BASKETBALL = False 
+TRACKING_PEOPLE = True
 if __name__ == '__main__':
     main()
