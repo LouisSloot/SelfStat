@@ -1,6 +1,7 @@
 from ultralytics import YOLO
 import cv2
-from label_players import get_manual_ids
+from label_players import get_manual_ids, crop_frame, extract_embedding
+import torch.nn.functional as functional
 
 ### Needed to use roboflow model for basketball recognition
 from inference_sdk import InferenceHTTPClient
@@ -80,7 +81,24 @@ def get_frame_info(src):
     cap.release()
     return w, h, fps
 
+def id_from_emb(id_to_emb, box, frame, conf = 0.75):
+    crop = crop_frame(box, frame)
+    emb = extract_embedding(crop)
+
+    best_id = None
+    best_sim = -1
+
+    for ref_id, ref_emb in id_to_emb.items():
+        curr_sim = functional.cosine_similarity(emb, ref_emb, dim = 0).item()
+        if curr_sim > max(best_sim, conf):
+            best_sim, best_id = curr_sim, ref_id
+    
+    return best_id
+
+
+
 def track_basketball(result):
+    ### Roboflow model
     img = result.orig_img
     result_basketball = CLIENT.infer(img,
                                 model_id="basketball-player-detection-v8kcy/6")
@@ -94,9 +112,11 @@ def track_basketball(result):
     return annotated_frame
     
 def track_people(result, records):
+    ### YOLO model
+    # TODO: Integrate id_to_emb here using cos similarity
     record = FrameRecord(result)
     records.append(record)
-    result.boxes = record.player_possession
+    # result.boxes = record.player_possession
     annotated_frame = result.plot()
     return annotated_frame
 
@@ -133,7 +153,8 @@ def main():
 
     results = model.track(src, stream = True, conf = 0.4, verbose = False)
 
-    TRACKING_BASKETBALL = False # used for essentially conditional compilation during development 
+    ### Used for conditional compilation during development 
+    TRACKING_BASKETBALL = False 
     TRACKING_PEOPLE = True
     
     create_annotated_replay(src, src_file, results, records, 
