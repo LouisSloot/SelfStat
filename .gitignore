@@ -7,7 +7,7 @@ annotated_replays/
 *.pth
 
 # YOLO
-*.pt
+YOLO/
 
 *.pyc
 *__pycache__/
