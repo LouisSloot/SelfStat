@@ -11,8 +11,29 @@ import numpy as np
 #      is me thinking ahead to when there are background people with boxes whom
 #      the program and user will naturally want to ignore.
 
-def extract_embedding(img, transform, resnet):
-    pil_img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+def get_transform():
+    transform = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize([0.485, 0.456, 0.406],
+                            [0.229, 0.224, 0.225])
+    ])
+    return transform
+
+def get_resnet():
+    resnet = models.resnet18(pretrained=True)
+    resnet.fc = torch.nn.Identity()
+    resnet.eval()
+    return resnet
+
+def crop_frame(box, frame):
+    x1, y1, x2, y2 = map(int, box.xyxy.squeeze().tolist())
+    return frame[y1:y2, x1:x2]
+
+def extract_embedding(crop):
+    transform = get_transform()
+    resnet = get_resnet()
+    pil_img = Image.fromarray(cv2.cvtColor(crop, cv2.COLOR_BGR2RGB))
     tensor = transform(pil_img).unsqueeze(0)
     with torch.no_grad():
         return resnet(tensor).squeeze(0)
@@ -41,12 +62,11 @@ def on_mouse_press(event, x, y, flags, param):
         if box_to_remove > -1:
             param["unlabeled_boxes"].pop(box_to_remove)
 
-def make_embeddings_map(ids, boxes, frame, transform, resnet):
+def make_embeddings_map(ids, boxes, frame):
     id_to_emb = dict()
     for id, box in zip(ids, boxes):
-        x1, y1, x2, y2 = map(int, box.xyxy.squeeze().tolist())
-        cropped_frame = frame[y1:y2, x1:x2]
-        emb = extract_embedding(cropped_frame, transform, resnet)
+        crop = crop_frame(box, frame)
+        emb = extract_embedding(crop)
         id_to_emb[id] = emb
     return id_to_emb
 
@@ -62,7 +82,7 @@ def get_frame_from_vid(vid_src, frame_num):
         return get_frame_from_vid(vid_src, 0) # default return first frame
         
 def get_person_boxes(model, frame):
-    results = model.predict(frame, conf = 0.4, verbose = False, show = False)
+    results = model.predict(frame, conf = 0.6, verbose = False, show = False)
     result = results[0] # always only one frame
     return [box for box in result.boxes if 
             result.names[int(box.cls)] == "person"]
@@ -77,16 +97,6 @@ def run_user_labeling(annotated_frame, unlabeled_boxes, param):
     cv2.destroyAllWindows()
 
 def get_manual_ids(model, vid_src, frame_num):
-    resnet = models.resnet18(pretrained=True)
-    resnet.fc = torch.nn.Identity()
-    resnet.eval()
-
-    transform = transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.ToTensor(),
-        transforms.Normalize([0.485, 0.456, 0.406],
-                            [0.229, 0.224, 0.225])
-    ])
 
     frame = get_frame_from_vid(vid_src, frame_num)
 
@@ -104,8 +114,7 @@ def get_manual_ids(model, vid_src, frame_num):
 
     run_user_labeling(annotated_frame, unlabeled_boxes, param_map)
 
-    id_to_emb = make_embeddings_map(manual_ids, selected_boxes, frame,
-                                    transform, resnet)
+    id_to_emb = make_embeddings_map(manual_ids, selected_boxes, frame)
     return id_to_emb
 
 
