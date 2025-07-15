@@ -8,6 +8,7 @@ annotated_replays/
 
 # YOLO
 YOLO/
+*.yaml
 
 *.pyc
 *__pycache__/
