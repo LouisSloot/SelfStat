@@ -3,20 +3,7 @@ import torch
 from ultralytics import YOLO
 from torchvision import models, transforms
 from PIL import Image
-
-#TODO: check that extracting the embeddings is actually helpful in persistent
-#      IDs. also make reassigning IDs not overlap names, and put some limit on
-#      how many ids can be assigned based on a number given by the user ... this
-#      is me thinking ahead to when there are background people with boxes whom
-#      the program and user will naturally want to ignore.
-
-def crop_frame(box, frame):
-    x1, y1, x2, y2 = get_corners(box)
-    return frame[y1:y2, x1:x2]
-
-# consider making some "utilities" file?
-def get_corners(box):
-    return map(int, box.xyxy.squeeze().tolist())
+from utils import *
 
 def extract_embedding(crop, resnet, transform):
     pil_img = Image.fromarray(cv2.cvtColor(crop, cv2.COLOR_BGR2RGB))
@@ -66,8 +53,8 @@ def get_frame_from_vid(vid_src, frame_num):
     if success:
         return frame
     else:
-        print(f"Failed to get frame {frame_num}.")
-        return get_frame_from_vid(vid_src, 0) # default return first frame
+        print(f"Failed to get frame {frame_num}. Returning None.")
+        return None
         
 def get_person_boxes(model, frame):
     results = model.predict(frame, conf = 0.6, verbose = False, show = False)
@@ -88,6 +75,7 @@ def run_user_labeling(annotated_frame, unlabeled_boxes, param):
 def get_manual_ids(model, resnet, transform, vid_src, frame_num):
 
     frame = get_frame_from_vid(vid_src, frame_num)
+    # Account for if frame is None here
 
     unlabeled_boxes = get_person_boxes(model, frame) 
     selected_boxes, str_ids = [], []

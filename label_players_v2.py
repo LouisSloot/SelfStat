@@ -1,9 +1,11 @@
 from detect import YOLODetector
+from reid_manager import IdentityManager
 from utils import *
 import cv2
 
+# eventually put these where ...IDs is called from
 detector = YOLODetector(model_path = "./YOLO/yolo12n.pt")
-id_manager = IdentityManager() # eventually put these where ...IDs is called from
+id_manager = IdentityManager(num_ids = 6, sim_thresh = 0.6) 
 
 def assign_and_draw_IDs(annotated_frame):
     

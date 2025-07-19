@@ -2,9 +2,9 @@ from ultralytics import YOLO
 import cv2
 import torch
 import time
-import torch.nn.functional as functional
+from utils import *
 from torchvision import models, transforms
-from label_players import get_manual_ids, crop_frame, extract_embedding, get_frame_from_vid, get_corners
+from label_players import get_manual_ids, crop_frame, extract_embedding, get_corners
 
 ### Need for roboflow model basketball recognition
 from inference_sdk import InferenceHTTPClient
@@ -53,23 +53,6 @@ def find_nearest_player(ball_box, person_boxes):
             best_IOU, best_person = curr_IOU, person_box
     return best_person
 
-def findIOU(xyxy1, xyxy2):
-    """ Standard Intersection over Union function. """
-    left1, top1, right1, btm1 = xyxy1
-    left2, top2, right2, btm2 = xyxy2
-    
-    intersection_w = min(right1, right2) - max(left1, left2)
-    intersection_h = min(btm1, btm2) - max(top1, top2)
-
-    intersection = intersection_w * intersection_h
-    if intersection <= 0: return 0
-
-    area1 = (right1 - left1) * (btm1 - top1)
-    area2 = (right2 - left2) * (btm2 - top2)
-    union = area1 + area2 - intersection # don't double-count overlap
-
-    return intersection / union
-
 class FrameRecord():
     """ Data structure used to store metadata for each frame. """
     frame_idx = 1
@@ -106,7 +89,7 @@ def id_from_emb(id_to_emb, box, frame, resnet, transform, conf = 0.75):
     best_sim = -1
 
     for ref_id, ref_emb in id_to_emb.items():
-        curr_sim = functional.cosine_similarity(emb, ref_emb, dim = 0).item()
+        curr_sim = cos_sim(emb, ref_emb)
         if curr_sim > max(best_sim, conf):
             best_sim, best_id = curr_sim, ref_id
     
@@ -143,12 +126,13 @@ def track_people(frame, result, records, id_to_emb, resnet, transform):
     tracked_ids = []
     for box in record.person_boxes:
         new_id = id_from_emb(id_to_emb, box, frame, resnet, transform, 
-                             conf = 0.75)
+                             conf = 0.9)
 
         if new_id:
             tracked_ids.append((box, new_id))
 
-    annotated_frame = draw_id_boxes(annotated_frame, tracked_ids)
+    draw_id_boxes(annotated_frame, tracked_ids) # overlay supervised IDs
+
     return annotated_frame
 
 def create_annotated_replay(src, results, records, id_to_emb, resnet, transform):
@@ -167,7 +151,7 @@ def create_annotated_replay(src, results, records, id_to_emb, resnet, transform)
         if frame_num % 100 == 0: 
             print(f"Analyzing frame: {frame_num} ")
 
-        frame = get_frame_from_vid(src, frame_num)
+        frame = result.orig_img    
 
         if TRACKING_BASKETBALL: 
             annotated_frame = track_basketball(result)
@@ -175,13 +159,12 @@ def create_annotated_replay(src, results, records, id_to_emb, resnet, transform)
         elif TRACKING_PEOPLE:
             annotated_frame = track_people(frame, result, records, id_to_emb,
                                            resnet, transform)
-            
+        
         out.write(annotated_frame)
 
     out.release()
 
 def get_frame_count(src):
-
     cap = cv2.VideoCapture(src)
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     cap.release()
@@ -195,13 +178,14 @@ def main():
     resnet = get_resnet()
 
     src = "./data_dir/raw_games/game_2_15s.MP4"
-    
+
     frame_count = get_frame_count(src)
     print(f"There are {frame_count} frames in {src}.")
 
     id_to_emb = get_manual_ids(model, resnet, transform, src, 45)
 
-    results = model.track(src, stream = True, conf = 0.4, verbose = False)
+    results = model.track(src, stream = True, conf = 0.6, 
+                          tracker = "botsort.yaml", verbose = False)
     
     create_annotated_replay(src, results, records, id_to_emb, resnet, transform)
 
