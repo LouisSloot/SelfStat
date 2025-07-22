@@ -1,12 +1,13 @@
 from utils import *
 from collections import deque
+import random
 
 class IdentityManager:
     def __init__(self, num_ids, sim_thresh = 0.5):
         self.num_ids = num_ids
         self.sim_thresh = sim_thresh
         self.embeddings = dict() # {pID: embedding}
-        self.last_pos = self.build_last_pos() # {pID: DEQEU( recent bbox's )}
+        self.last_pos = self.build_last_pos() # {pID: DEQUE( recent bbox's )}
 
     def build_last_pos(self):
         last_pos = dict()
@@ -30,65 +31,68 @@ class IdentityManager:
             curr_pID += 1
 
     def identify(self, boxes, frame):
-        ids_taken = set()
-        id_to_best = dict() # {id: (box, emb) of best fit thus far}
+        """ Returns a dict mapping box_num: ID. """
+        assigned_ids = dict() # {box: ID}
+        id_to_fit = dict() # {ID: (box, fit_scores)}
+        scores = [self.calc_fit_scores(box, frame) for box in boxes]
 
-        for box in boxes:
-            crop = crop_frame(box, frame)
-            emb = self.get_embedding(crop)
-            best_sim = -1
-            best_match = None
-
-            for pID, emb_ref in self.embeddings.items():
-                curr_sim = cos_sim(emb, emb_ref)
-
-                if curr_sim > best_sim:
-
-                    if pID not in ids_taken:
-                        best_match = pID
-                        best_sim = curr_sim
-                        id_to_best[pID] = (box, emb)
-
-                    else: # pID already taken -- need to tiebreak
-                        contested_box, contested_emb = id_to_best[pID]
-                        result = self.tiebreak_id(emb, box, 
-                                                  contested_emb, contested_box,
-                                                  pID)
-                        if result: # curr was a better fit than contested
-                            best_match = pID
-                            best_sim = curr_sim
-                            id_to_best[pID] = (box, emb)
-                            # TODO: give the box that just got beaten a new ID
-
-            if best_match is not None:
-                ids_taken.add(best_match)
-                id_to_best[best_match] = (box, emb)
-
-    def tiebreak(self, emb1, box1, emb2, box2, pID):
-        """ Returns True if emb1, box1 is a better match for the pID. """
-        ### Future additions: Past Velocity/Acceleration + color matching(?)
-        emb_ref = self.embeddings[pID]
-        last_pos = self.last_pos[pID]
-
-        xyxy1, xyxy2 = get_corners(box1), get_corners(box2)
-        sim1, sim2 = cos_sim(emb1, emb_ref), cos_sim(emb2, emb_ref)
-
-        if last_pos is None:
-            return (sim1 > sim2)
+        Q = deque(zip(boxes, scores))
         
-        else:
+        while Q: # still a box left to identify
+            box, fit_scores = Q.popleft()
+            best_score = max(fit_scores)
+            best_pID = fit_scores.index(best_score)
+            
+            if best_pID not in id_to_fit.keys():
+                id_to_fit[best_pID] = (box, fit_scores)
+            
+            else:
+                other_box, other_fit_scores = id_to_fit[best_pID]
+                other_score = other_fit_scores[best_pID]
+
+                if best_score > other_score:
+                    id_to_fit[best_pID] = (box, fit_scores)
+                    other_fit_scores[best_pID] = -1 # kill the score for this ID
+                    Q.append((other_box, other_fit_scores))
+                
+                else:
+                    fit_scores[best_pID] = -1 # same as above
+                    Q.append((box, fit_scores))
+
+        for pID in id_to_fit.keys():
+            assigned_box = id_to_fit[pID][0]
+            assigned_ids[assigned_box] = pID
+        
+        return assigned_ids
+
+    def calc_fit_scores(self, box, frame):
+        crop = crop_frame(box, frame)
+        emb = self.get_embedding(crop)
+        fit_scores = [0] * self.num_ids
+
+        for pID in range(self.num_ids):
+            curr_score = 0
+            emb_ref = self.embeddings[pID]
+            sim = cos_sim(emb, emb_ref)
             sim_min, sim_max = -1, 1
-            sim1_norm = normalize(sim1, sim_min, sim_max)
-            sim2_norm = normalize(sim2, sim_min, sim_max)
+            sim_norm = normalize(sim, sim_min, sim_max)
 
-            xyxy_ref = get_corners(last_pos)
-            iou1, iou2 = findIOU(xyxy1, xyxy_ref), findIOU(xyxy2, xyxy_ref)
-            # IOU already in [0,1]
-            weight_sim, weight_iou = 0.65, 1
+            last_pos = self.last_pos[pID]
+            if last_pos is None:
+                curr_score = sim_norm
+            
+            else:
+                xyxy = get_corners(box)
+                xyxy_ref = get_corners(last_pos)
+                iou = findIOU(xyxy, xyxy_ref)
+                # IOU already in [0,1]
+                weight_sim, weight_iou = 0.7, 0.3
+                # weights sum to 1, so score is normalized already
+                curr_score = (sim_norm * weight_sim) + (iou * weight_iou)
+            
+            fit_scores[pID] = curr_score
 
-            score_1 = (sim1_norm * weight_sim) + (iou1 * weight_iou)
-            score_2 = (sim2_norm * weight_sim) + (iou2 * weight_iou)
-            return score_1 > score_2
+        return fit_scores
 
     def add_pos(self, xyxy, id):
         self.last_pos[id].append(xyxy)
