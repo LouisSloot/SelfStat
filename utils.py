@@ -1,10 +1,11 @@
 import torch.nn.functional as functional
 
 def cos_sim(emb1, emb2):
-    return functional.cosine_similarity(emb1, emb2, dim = 0).item() # [0,1]
+    """ Returns the cosine similarity of two tensors. """
+    return functional.cosine_similarity(emb1, emb2, dim = 0).item() # [-1,1]
 
 def findIOU(xyxy1, xyxy2):
-    """ Standard Intersection over Union function. """
+    """ Find the Intersection over Union of two rectangular boxes. """
     left1, top1, right1, btm1 = xyxy1
     left2, top2, right2, btm2 = xyxy2
     
@@ -21,13 +22,22 @@ def findIOU(xyxy1, xyxy2):
     return intersection / union
 
 def get_corners(box):
+    """ Return the integer coordinates of the top left and bottom right 
+        corners of a bounding box. """
     return map(int, box.xyxy.squeeze().tolist())
 
 def crop_frame(box, frame):
+    """ Crops a video frame/photo down to the given bounding box. """
     x1, y1, x2, y2 = get_corners(box)
     return frame[y1:y2, x1:x2]
 
 def get_person_boxes(result):
+    """ Returns only the bounding boxes detected for people from a YOLO results
+        object. """
     boxes = result.boxes
     return [box for box in boxes if 
             result.names[int(box.cls)] == "person"]
+
+def normalize(x, x_min, x_max):
+    """ Min - Max normalization. """
+    return (x - x_min) / (x_max - x_min) # maps to [0,1]
