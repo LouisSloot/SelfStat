@@ -1,16 +1,17 @@
 from utils import *
+from collections import deque
 
 class IdentityManager:
     def __init__(self, num_ids, sim_thresh = 0.5):
         self.num_ids = num_ids
         self.sim_thresh = sim_thresh
         self.embeddings = dict() # {pID: embedding}
-        self.last_pos = self.build_last_pos() # {pID: most recent bbox}
+        self.last_pos = self.build_last_pos() # {pID: DEQEU( recent bbox's )}
 
     def build_last_pos(self):
         last_pos = dict()
         for pID in range(self.num_ids):
-            last_pos[pID] = None
+            last_pos[pID] = deque()
         return last_pos
 
     def get_embedding(self, crop):
@@ -38,13 +39,15 @@ class IdentityManager:
             best_sim = -1
             best_match = None
 
-            for pID, ref_emb in self.embeddings.items():
-                curr_sim = cos_sim(emb, ref_emb)
+            for pID, emb_ref in self.embeddings.items():
+                curr_sim = cos_sim(emb, emb_ref)
 
                 if curr_sim > best_sim:
 
                     if pID not in ids_taken:
                         best_match = pID
+                        best_sim = curr_sim
+                        id_to_best[pID] = (box, emb)
 
                     else: # pID already taken -- need to tiebreak
                         contested_box, contested_emb = id_to_best[pID]
@@ -53,6 +56,8 @@ class IdentityManager:
                                                   pID)
                         if result: # curr was a better fit than contested
                             best_match = pID
+                            best_sim = curr_sim
+                            id_to_best[pID] = (box, emb)
                             # TODO: give the box that just got beaten a new ID
 
             if best_match is not None:
@@ -61,20 +66,29 @@ class IdentityManager:
 
     def tiebreak(self, emb1, box1, emb2, box2, pID):
         """ Returns True if emb1, box1 is a better match for the pID. """
-        weighted_res = 0
-        ref_emb = self.embeddings[pID]
+        ### Future additions: Past Velocity/Acceleration + color matching(?)
+        emb_ref = self.embeddings[pID]
         last_pos = self.last_pos[pID]
 
         xyxy1, xyxy2 = get_corners(box1), get_corners(box2)
-        sim1, sim2 = cos_sim(emb1, ref_emb), cos_sim(emb2, ref_emb)
+        sim1, sim2 = cos_sim(emb1, emb_ref), cos_sim(emb2, emb_ref)
 
-        sim_diff = sim1 - sim2 # >0 iff sim1 a better match
+        if last_pos is None:
+            return (sim1 > sim2)
+        
+        else:
+            sim_min, sim_max = -1, 1
+            sim1_norm = normalize(sim1, sim_min, sim_max)
+            sim2_norm = normalize(sim2, sim_min, sim_max)
 
-        if last_pos is not None:
             xyxy_ref = get_corners(last_pos)
             iou1, iou2 = findIOU(xyxy1, xyxy_ref), findIOU(xyxy2, xyxy_ref)
-            #TODO: Finish this method
+            # IOU already in [0,1]
+            weight_sim, weight_iou = 0.65, 1
 
+            score_1 = (sim1_norm * weight_sim) + (iou1 * weight_iou)
+            score_2 = (sim2_norm * weight_sim) + (iou2 * weight_iou)
+            return score_1 > score_2
 
     def add_pos(self, xyxy, id):
         self.last_pos[id].append(xyxy)
