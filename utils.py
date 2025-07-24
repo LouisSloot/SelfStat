@@ -1,4 +1,5 @@
 import torch.nn.functional as functional
+import cv2
 
 def cos_sim(emb1, emb2):
     """ Returns the cosine similarity of two tensors. """
@@ -41,3 +42,17 @@ def get_person_boxes(result):
 def normalize(x, x_min, x_max):
     """ Min - Max normalization. """
     return (x - x_min) / (x_max - x_min) # maps to [0,1]
+
+def get_vid_info(src):
+    cap = cv2.VideoCapture(src)
+    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    cap.release()
+    return w, h, fps
+
+def get_frame_count(src):
+    cap = cv2.VideoCapture(src)
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    cap.release()
+    return frame_count
