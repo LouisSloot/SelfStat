@@ -1,15 +1,5 @@
 import cv2
-import torch
-from ultralytics import YOLO
-from torchvision import models, transforms
-from PIL import Image
 from utils import *
-
-def extract_embedding(crop, resnet, transform):
-    pil_img = Image.fromarray(cv2.cvtColor(crop, cv2.COLOR_BGR2RGB))
-    tensor = transform(pil_img).unsqueeze(0)
-    with torch.no_grad():
-        return resnet(tensor).squeeze(0)
 
 def draw_unlabeled_boxes(frame, boxes):
     for box in boxes:
@@ -25,7 +15,7 @@ def on_mouse_press(event, x, y, flags, param):
             if x1 <= x <= x2 and y1 <= y <= y2:
                 print(f"Clicked on box at ({x},{y})")
                 player_id = input("Enter player ID: ")
-                ### Add validity checks for the entered ID here
+                ### TODO: Add validity checks for the entered ID here
                 param["manual_ids"].append(player_id)
                 param["selected_boxes"].append(box)
                 box_to_remove = i
@@ -37,14 +27,6 @@ def on_mouse_press(event, x, y, flags, param):
         if box_to_remove > -1:
             param["unlabeled_boxes"].pop(box_to_remove)
 
-def make_embeddings_map(ids, boxes, frame, resnet, transform):
-    id_to_emb = dict()
-    for id, box in zip(ids, boxes):
-        crop = crop_frame(box, frame)
-        emb = extract_embedding(crop, resnet, transform)
-        id_to_emb[id] = emb
-    return id_to_emb
-
 def get_frame_from_vid(vid_src, frame_num):
     cap = cv2.VideoCapture(vid_src)
     cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
@@ -55,12 +37,6 @@ def get_frame_from_vid(vid_src, frame_num):
     else:
         print(f"Failed to get frame {frame_num}. Returning None.")
         return None
-        
-def get_person_boxes(model, frame):
-    results = model.predict(frame, conf = 0.6, verbose = False, show = False)
-    result = results[0] # always only one frame
-    return [box for box in result.boxes if 
-            result.names[int(box.cls)] == "person"]
 
 def run_user_labeling(annotated_frame, unlabeled_boxes, param):
     draw_unlabeled_boxes(annotated_frame, unlabeled_boxes)
@@ -72,12 +48,14 @@ def run_user_labeling(annotated_frame, unlabeled_boxes, param):
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
-def get_manual_ids(model, resnet, transform, vid_src, frame_num):
-
+def get_sv_ids(detector, vid_src, frame_num):
+    """ Return a list of tuples (id, crop) pairing the user-labeled crops
+        of the user-chosen reference frame with the respective user-entered IDs. """
     frame = get_frame_from_vid(vid_src, frame_num)
-    # Account for if frame is None here
+    # TODO: Account for if frame is None here
 
-    unlabeled_boxes = get_person_boxes(model, frame) 
+    result = detector.detect_frame(frame)
+    unlabeled_boxes = get_person_boxes(result) 
     selected_boxes, str_ids = [], []
     annotated_frame = frame.copy()
 
@@ -90,31 +68,14 @@ def get_manual_ids(model, resnet, transform, vid_src, frame_num):
 
     run_user_labeling(annotated_frame, unlabeled_boxes, param_map)
 
-    id_to_emb = make_embeddings_map(str_ids, selected_boxes, frame, resnet,
-                                    transform)
-    return id_to_emb
+    crops = [crop_frame(box, frame) for box in selected_boxes]
+    sv_ids = zip(str_ids, crops)
+
+    return sv_ids
 
 
 def main():
-    ### Only run for testing this specific file
-    src = "./data_dir/raw_games/game_2_15s.MP4"
-    FRAME_TO_LABEL = 45 # hand-picked for testing right now
-    model = YOLO("./YOLO/yolo12n.pt")
-    
-    resnet = models.resnet18(weights = models.ResNet18_Weights.DEFAULT)
-    resnet.fc = torch.nn.Identity()
-    resnet.eval()
-
-    transform = transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.ToTensor(),
-        transforms.Normalize([0.485, 0.456, 0.406],
-                            [0.229, 0.224, 0.225])
-    ])
-
-    # string id --> reference embedding
-    id_to_emb = get_manual_ids(model, resnet, transform, src, FRAME_TO_LABEL)
-
+   return
 
 if __name__ == '__main__':
     main()
