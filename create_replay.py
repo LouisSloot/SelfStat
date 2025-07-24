@@ -1,11 +1,12 @@
 import cv2
 from utils import *
 
-def draw_labeled_boxes(frame, box_to_pID):
+def draw_labeled_boxes(frame, box_to_pID, id_manager):
     for box, pID in box_to_pID:
+        label_id = id_manager.get_sv_id(pID)
         x1, y1, x2, y2 = get_corners(box)
         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-        cv2.putText(frame, f"ID: {pID}", (x1, y1 - 10),
+        cv2.putText(frame, f"ID: {label_id}", (x1, y1 - 10),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)    
 
 def create_replay(src, results, id_manager):
