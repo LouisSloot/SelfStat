@@ -56,3 +56,14 @@ def get_frame_count(src):
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     cap.release()
     return frame_count
+
+def get_frame_from_vid(vid_src, frame_num):
+    cap = cv2.VideoCapture(vid_src)
+    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
+    success, frame = cap.read()
+    cap.release()
+    if success:
+        return frame
+    else:
+        print(f"Failed to get frame {frame_num}. Returning None.")
+        return None
