@@ -25,10 +25,12 @@ def create_replay(src, results, id_manager):
         if frame_idx % 100 == 0: print(f"Frame {frame_idx} / {frame_count}")
 
         frame = result.orig_img
+        annotated_frame = frame.copy()
+
         person_boxes = get_person_boxes(result)
 
         box_to_pID = id_manager.identify(person_boxes, frame)
 
-        annotated_frame = draw_labeled_boxes(frame, box_to_pID)
+        draw_labeled_boxes(annotated_frame, box_to_pID)
 
         out.write(annotated_frame)
