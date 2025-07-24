@@ -2,10 +2,9 @@ from utils import *
 from collections import deque
 
 class IdentityManager:
-    def __init__(self, num_ids, sim_thresh = 0.5):
+    def __init__(self, num_ids):
         self.num_ids = num_ids
-        self.sim_thresh = sim_thresh
-        self.embeddings = dict() # {pID: embedding}
+        self.embeddings = dict() # {pID: embedding reference}
         self.last_pos = self.build_last_pos() # {pID: DEQUE( recent bbox's )}
 
     def build_last_pos(self):
@@ -19,7 +18,7 @@ class IdentityManager:
         emb = crop.flatten() / 255.0
         return emb
     
-    def build_embeddings(self, crops):
+    def build_embedding_refs(self, crops):
         if len(crops) != self.num_ids:
             print(f"Number of boxes ({len(crops)}) and players ({self.num_ids}) are not equal in build_embeddings.")
 
