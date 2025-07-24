@@ -1,6 +1,5 @@
 from utils import *
 from collections import deque
-import random
 
 class IdentityManager:
     def __init__(self, num_ids, sim_thresh = 0.5):

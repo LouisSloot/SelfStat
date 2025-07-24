@@ -23,12 +23,7 @@ def assign_and_draw_IDs(annotated_frame, detector, id_manager):
 def main():
     # eventually put these where ...IDs is called from
     detector = YOLODetector(model_path = "./YOLO/yolo12n.pt")
-    id_manager = IdentityManager(num_ids = 6, sim_thresh = 0.6) 
-
-    src = "./data_dir/raw_games/game_2_15s.MP4"
-    results = detector.detect(src)
-
-    create_annotated_replay(results)
+    id_manager = IdentityManager(num_ids = 6, sim_thresh = 0.6)
 
 if __name__ == '__main__':
     main()
