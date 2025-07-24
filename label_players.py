@@ -48,7 +48,7 @@ def run_user_labeling(annotated_frame, unlabeled_boxes, param):
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
-def get_sv_ids(detector, vid_src, frame_num):
+def supervised_label(detector, vid_src, frame_num):
     """ Return a list of tuples (id, crop) pairing the user-labeled crops
         of the user-chosen reference frame with the respective user-entered IDs. """
     frame = get_frame_from_vid(vid_src, frame_num)
@@ -56,22 +56,21 @@ def get_sv_ids(detector, vid_src, frame_num):
 
     result = detector.detect_frame(frame)
     unlabeled_boxes = get_person_boxes(result) 
-    selected_boxes, str_ids = [], []
+    selected_boxes, sv_ids = [], []
     annotated_frame = frame.copy()
 
     param_map = {
         "unlabeled_boxes": unlabeled_boxes,
         "selected_boxes": selected_boxes,
-        "manual_ids": str_ids,
+        "manual_ids": sv_ids,
         "frame": annotated_frame
     }
 
     run_user_labeling(annotated_frame, unlabeled_boxes, param_map)
 
     crops = [crop_frame(box, frame) for box in selected_boxes]
-    sv_ids = zip(str_ids, crops)
 
-    return sv_ids
+    return sv_ids, crops
 
 
 def main():
