@@ -2,16 +2,27 @@ from utils import *
 from collections import deque
 
 class IdentityManager:
-    def __init__(self, num_ids):
+    def __init__(self, num_ids, sv_ids):
         self.num_ids = num_ids
+        self.sv_id_lookup = self.build_sv_id_lookup(sv_ids)
         self.embeddings = dict() # {pID: embedding reference}
         self.last_pos = self.build_last_pos() # {pID: DEQUE( recent bbox's )}
+
+    def build_sv_id_lookup(self, sv_ids):
+        # TODO: Error handle if len(sv_ids) != self.num_ids
+        sv_id_lookup = dict()
+        for pID in range(self.num_ids):
+            sv_id_lookup[pID] = sv_ids[pID]
 
     def build_last_pos(self):
         last_pos = dict()
         for pID in range(self.num_ids):
             last_pos[pID] = deque()
         return last_pos
+    
+    def get_sv_id(self, pID):
+        # TODO: Error handle an invalid pID
+        return self.sv_id_lookup[pID]
 
     def get_embedding(self, crop):
         # will improve with some reID model; naive for now
