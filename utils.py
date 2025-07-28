@@ -67,3 +67,11 @@ def get_frame_from_vid(vid_src, frame_num):
     else:
         print(f"Failed to get frame {frame_num}. Returning None.")
         return None
+    
+def get_center(box):
+    x1, y1, x2, y2 = get_corners(box)
+    return ((x1 + x2) / 2, (y1 + y2) / 2)
+
+def get_wh(box):
+    _, _, w, h = box.xywh
+    return w, h
