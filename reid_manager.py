@@ -3,6 +3,9 @@ from collections import deque
 import torchvision.transforms as T
 import numpy as np
 from scipy.optimize import linear_sum_assignment
+import torch
+import torch.nn.functional as F
+from torchreid import models
 
 ### MAJOR TODO: -improve reID logic, including get_embedding 
 ###             -consider constantly updating emb_ref for each player
@@ -12,7 +15,7 @@ class IdentityManager:
     Manages player identity tracking across video frames using appearance and position features.
     Combines embedding similarity with motion prediction for robust re-identification.
     """
-    def __init__(self, num_ids, sv_ids, conf_thresh = 0.3):
+    def __init__(self, num_ids, sv_ids, conf_thresh = 0.3, update_rate = 0.1):
         """
         Initialize identity manager with player count and supervised IDs.
         
@@ -20,16 +23,33 @@ class IdentityManager:
             num_ids (int): Number of players to track
             sv_ids (list): User-provided labels for each player
             conf_thresh (float): Minimum confidence threshold for ID assignment
+            update_rate (float): Learning rate for embedding updates (0.0-1.0)
         """
         self.num_ids = num_ids
         self.sv_id_lookup = self.build_sv_id_lookup(sv_ids)
         self.conf_thresh = conf_thresh
-        self.embeddings = dict() # {pID: embedding reference}
+        self.update_rate = update_rate
+        self.embeddings = dict() # {pID: current embedding reference}
+        self.embedding_history = dict() # {pID: deque of recent embeddings}
         self.last_pos = dict() # {pID: DEQUE( recent bbox's )}
+        
+        if torch.backends.mps.is_available(): # i am developing on a mac
+            self.device = torch.device('mps')
+        elif torch.cuda.is_available():
+            self.device = torch.device('cuda')
+        else:
+            self.device = torch.device('cpu')
+        self.reid_model = models.build_model(
+            name='osnet_x0_25',
+            num_classes=1000,  # ignored since we use features
+            pretrained=True
+        )
+        self.reid_model.eval()
+        self.reid_model.to(self.device)
         
         self.transform = T.Compose([
             T.ToPILImage(),
-            T.Resize((128, 64)),
+            T.Resize((256, 128)),  # OSNet's preferred input size
             T.ToTensor(),
             T.Normalize(mean=[0.485, 0.456, 0.406],
                         std=[0.229, 0.224, 0.225])
@@ -76,22 +96,31 @@ class IdentityManager:
 
     def get_embedding(self, crop):
         """
-        Extract appearance embedding from player crop using CNN features.
+        Extract appearance embedding from player crop using OSNet ReID model.
         
         Args:
             crop (np.ndarray): Cropped image region containing player
             
         Returns:
-            torch.Tensor: Flattened feature vector for similarity comparison
+            torch.Tensor: L2-normalized feature vector for similarity comparison
         """
-        # will improve with some reID model; naive for now
-        rgb_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)  # BGR -> RGB
-        img_tensor = self.transform(rgb_crop)  # Tensor: [C, H, W]
-        return img_tensor.flatten()  # Flattened 1D tensor for cosine similarity
+        if crop is None or crop.size == 0:
+            return torch.zeros(512)
+        
+        rgb_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+        img_tensor = self.transform(rgb_crop).unsqueeze(0)
+        img_tensor = img_tensor.to(self.device)
+        
+        with torch.no_grad():
+            features = self.reid_model(img_tensor)
+            features = F.normalize(features, p=2, dim=1)
+        
+        return features.squeeze(0).cpu()
     
     def build_embedding_refs(self, crops):
         """
-        Build reference embeddings for each player from initial labeled crops.
+        Build initial reference embeddings for each player from labeled crops.
+        Also initializes embedding history for iterative updates.
         
         Args:
             crops (list): List of cropped player images from reference frame
@@ -103,6 +132,8 @@ class IdentityManager:
         for crop in crops:
             emb = self.get_embedding(crop)
             self.embeddings[curr_pID] = emb
+            # init history with the ref emb
+            self.embedding_history[curr_pID] = deque([emb.clone()], maxlen=5)
             curr_pID += 1
 
     def identify(self, boxes, frame):
@@ -153,6 +184,8 @@ class IdentityManager:
                     assigned_ids[box] = player_idx
         
         self.update_last_pos(assigned_ids)
+        # Update embeddings with new detections
+        self.update_embeddings(assigned_ids, frame)
         return assigned_ids
     
     def pred_next_pos(self, pID):
@@ -172,7 +205,7 @@ class IdentityManager:
         if len(positions) < 2:
             return get_corners(positions[0]) if positions else None
         
-        # pixles / frame
+        # pixels / frame
         x_velos = []
         y_velos = []
         
@@ -207,7 +240,7 @@ class IdentityManager:
     def calc_fit_scores(self, box, frame):
         """
         Calculate similarity scores between a detection and all known players.
-        Combines appearance similarity with predicted position overlap.
+        Uses embedding history for robust multi-reference matching and combines with position.
         
         Args:
             box: Bounding box detection to evaluate
@@ -217,32 +250,79 @@ class IdentityManager:
             list: Similarity scores for each player ID [0-1]
         """
         crop = crop_frame(box, frame)
-        emb = self.get_embedding(crop)
+        emb_candidate = self.get_embedding(crop)
         fit_scores = [0] * self.num_ids
 
         for pID in range(self.num_ids):
-            curr_score = 0
-            emb_ref = self.embeddings[pID]
-            sim = cos_sim(emb, emb_ref)
-            sim_min, sim_max = -1, 1
-            sim_norm = normalize(sim, sim_min, sim_max)
-
-            pred_pos = self.pred_next_pos(pID) # already xyxy format
             
-            if pred_pos is None:
-                curr_score = sim_norm
+            score_appearance = self.calc_appearance_score(emb_candidate, pID)
+            score_pos = self.calc_position_score(box, pID)
             
-            else:
-                xyxy = get_corners(box)
-                iou = findIOU(xyxy, pred_pos)
-                # IOU already in [0,1]
-                weight_sim, weight_iou = 0.7, 0.3
-                # weights sum to 1, so score is normalized already
-                curr_score = (sim_norm * weight_sim) + (iou * weight_iou)
+            weight_appearance, weight_pos = 0.7, 0.3
+            score_ovr = (score_appearance * weight_appearance) + (score_pos * weight_pos)
             
-            fit_scores[pID] = curr_score
+            fit_scores[pID] = score_ovr
 
         return fit_scores
+    
+    def calc_appearance_score(self, emb_candidate, pID):
+        """
+        Calculate appearance similarity using embedding history for robust matching.
+        
+        Args:
+            candidate_emb (torch.Tensor): Embedding of candidate detection
+            pID (int): Player ID to compare against
+            
+        Returns:
+            float: Normalized appearance similarity score [0-1]
+        """
+        if pID not in self.embedding_history:
+            return 0.0
+        
+        history = list(self.embedding_history[pID])
+        if not history:
+            return 0.0
+        
+        sims = []
+        
+        for emb_hist in history:
+            sim = cos_sim(emb_candidate, emb_hist)
+            sims.append(sim)
+        
+        sim_avg = sum(sims) / len(sims)
+        sim_min, sim_max = -1, 1
+        score_appearance = normalize(sim_avg, sim_min, sim_max)
+
+        return score_appearance
+
+    def calc_position_score(self, box, pID):
+        pred_pos = self.pred_next_pos(pID)
+                
+        if pred_pos is None:
+            return None
+        else:
+            xyxy = get_corners(box)
+            iou = findIOU(xyxy, pred_pos)
+        return iou
+
+    def update_embeddings(self, assigned_ids, frame):
+        """
+        Update player embeddings using exponential moving average from new detections.
+        
+        Args:
+            assigned_ids (dict): Mapping from bounding box to assigned player ID
+            frame (np.ndarray): Current video frame for cropping
+        """
+        for box, pID in assigned_ids.items():
+            crop = crop_frame(box, frame)
+            new_embedding = self.get_embedding(crop)
+            
+            current_emb = self.embeddings[pID]
+            updated_emb = (1 - self.update_rate) * current_emb + self.update_rate * new_embedding
+            
+            self.embeddings[pID] = F.normalize(updated_emb, p=2, dim=0)
+            
+            self.embedding_history[pID].append(updated_emb.clone())
     
     def update_last_pos(self, assigned_ids):
         """
