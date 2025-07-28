@@ -8,7 +8,19 @@ from scipy.optimize import linear_sum_assignment
 ###             -consider constantly updating emb_ref for each player
 
 class IdentityManager:
+    """
+    Manages player identity tracking across video frames using appearance and position features.
+    Combines embedding similarity with motion prediction for robust re-identification.
+    """
     def __init__(self, num_ids, sv_ids, conf_thresh = 0.3):
+        """
+        Initialize identity manager with player count and supervised IDs.
+        
+        Args:
+            num_ids (int): Number of players to track
+            sv_ids (list): User-provided labels for each player
+            conf_thresh (float): Minimum confidence threshold for ID assignment
+        """
         self.num_ids = num_ids
         self.sv_id_lookup = self.build_sv_id_lookup(sv_ids)
         self.conf_thresh = conf_thresh
@@ -24,6 +36,15 @@ class IdentityManager:
         ])
 
     def build_sv_id_lookup(self, sv_ids):
+        """
+        Create mapping from numerical player IDs to user-provided supervised labels.
+        
+        Args:
+            sv_ids (list): User-provided string labels for each player
+            
+        Returns:
+            dict: Mapping from pID (int) to supervised label (str)
+        """
         # TODO: Error handle if len(sv_ids) != self.num_ids
         sv_id_lookup = dict()
         for pID in range(self.num_ids):
@@ -31,20 +52,50 @@ class IdentityManager:
         return sv_id_lookup
 
     def build_last_pos(self, selected_boxes):
+        """
+        Initialize position history deques with initial labeled bounding boxes.
+        
+        Args:
+            selected_boxes (list): Initial bounding boxes from user labeling
+        """
         for pID, box in zip(range(self.num_ids), selected_boxes):
             self.last_pos[pID] = deque([box], maxlen = 5)
     
     def get_sv_id(self, pID):
+        """
+        Retrieve user-provided supervised label for a given player ID.
+        
+        Args:
+            pID (int): Numerical player ID
+            
+        Returns:
+            str: User-provided label for this player
+        """
         # TODO: Error handle an invalid pID
         return self.sv_id_lookup[pID]
 
     def get_embedding(self, crop):
+        """
+        Extract appearance embedding from player crop using CNN features.
+        
+        Args:
+            crop (np.ndarray): Cropped image region containing player
+            
+        Returns:
+            torch.Tensor: Flattened feature vector for similarity comparison
+        """
         # will improve with some reID model; naive for now
         rgb_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)  # BGR -> RGB
         img_tensor = self.transform(rgb_crop)  # Tensor: [C, H, W]
         return img_tensor.flatten()  # Flattened 1D tensor for cosine similarity
     
     def build_embedding_refs(self, crops):
+        """
+        Build reference embeddings for each player from initial labeled crops.
+        
+        Args:
+            crops (list): List of cropped player images from reference frame
+        """
         if len(crops) != self.num_ids:
             print(f"Number of boxes ({len(crops)}) and players ({self.num_ids}) are not equal in build_embeddings.")
 
@@ -55,7 +106,18 @@ class IdentityManager:
             curr_pID += 1
 
     def identify(self, boxes, frame):
-        """ Returns a dict mapping box: pID using Hungarian algorithm for optimal assignment. """
+        """
+        Assign player IDs to detected bounding boxes using Hungarian algorithm for optimal matching.
+        Relies on calc_fit_scores method to find globally optimal assignments.
+        
+        Args:
+            boxes (list): List of detected bounding boxes from current frame
+            frame (np.ndarray): Current video frame for appearance analysis
+            
+        Returns:
+            dict: Mapping from bounding box to assigned player ID (pID)
+                 Only includes assignments above confidence threshold
+        """
         if not boxes:
             return dict()
             
@@ -92,8 +154,68 @@ class IdentityManager:
         
         self.update_last_pos(assigned_ids)
         return assigned_ids
+    
+    def pred_next_pos(self, pID):
+        """
+        Predict next bounding box position using velocity calculated from position history.
+        Uses average velocity across recent positions to extrapolate future location.
+        
+        Args:
+            pID (int): Player ID for which to predict position
+            
+        Returns:
+            tuple or None: Predicted bounding box as (x1, y1, x2, y2),
+                          or None if insufficient position history
+        """
+        positions = list(self.last_pos[pID])
+
+        if len(positions) < 2:
+            return positions[-1] if positions else None
+        
+        # pixles / frame
+        x_velos = []
+        y_velos = []
+        
+        for i in range(len(positions) - 1):
+            curr_box = positions[i]
+            next_box = positions[i + 1]
+            
+            curr_cx, curr_cy = get_center(curr_box)
+            next_cx, next_cy = get_center(next_box)
+            
+            x_velos.append(next_cx - curr_cx)
+            y_velos.append(next_cy - curr_cy)
+        
+        avg_x_velo = sum(x_velos) / len(x_velos)
+        avg_y_velo = sum(y_velos) / len(y_velos)
+        
+        last_box = positions[-1]
+        last_cx, last_cy = get_center(last_box)
+        last_w, last_h = get_wh(last_box)
+        
+        pred_cx = last_cx + avg_x_velo
+        pred_cy = last_cy + avg_y_velo
+        
+        pred_x1 = int(pred_cx - (last_w / 2))
+        pred_y1 = int(pred_cy - (last_h / 2))
+        pred_x2 = int(pred_cx + (last_w / 2))
+        pred_y2 = int(pred_cy + (last_h / 2))
+        
+        return (pred_x1, pred_y1, pred_x2, pred_y2)
+
 
     def calc_fit_scores(self, box, frame):
+        """
+        Calculate similarity scores between a detection and all known players.
+        Combines appearance similarity with predicted position overlap.
+        
+        Args:
+            box: Bounding box detection to evaluate
+            frame (np.ndarray): Current video frame
+            
+        Returns:
+            list: Similarity scores for each player ID [0-1]
+        """
         crop = crop_frame(box, frame)
         emb = self.get_embedding(crop)
         fit_scores = [0] * self.num_ids
@@ -105,14 +227,14 @@ class IdentityManager:
             sim_min, sim_max = -1, 1
             sim_norm = normalize(sim, sim_min, sim_max)
 
-            last_pos = self.last_pos[pID][-1]
-            if last_pos is None:
+            pred_pos = self.pred_next_pos(pID) # already xyxy format
+            
+            if pred_pos is None:
                 curr_score = sim_norm
             
             else:
                 xyxy = get_corners(box)
-                xyxy_ref = get_corners(last_pos)
-                iou = findIOU(xyxy, xyxy_ref)
+                iou = findIOU(xyxy, pred_pos)
                 # IOU already in [0,1]
                 weight_sim, weight_iou = 0.7, 0.3
                 # weights sum to 1, so score is normalized already
@@ -123,5 +245,11 @@ class IdentityManager:
         return fit_scores
     
     def update_last_pos(self, assigned_ids):
+        """
+        Update position history with newly assigned bounding boxes.
+        
+        Args:
+            assigned_ids (dict): Mapping from bounding box to assigned player ID
+        """
         for box, pID in assigned_ids.items():
             self.last_pos[pID].append(box)
