@@ -7,10 +7,12 @@ class YOLODetector:
 
     def detect_video(self, src):
         results = self.model.predict(source = src, stream = True,
-                                          conf = self.conf)
+                                          conf = self.conf,
+                                          verbose = False)
         return results
     
     def detect_frame(self, frame):
         results = self.model.predict(source = frame, stream = False, 
-                                     conf = self.conf)
+                                     conf = self.conf,
+                                     verbose = False)
         return results[0]
