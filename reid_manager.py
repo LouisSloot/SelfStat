@@ -1,24 +1,38 @@
 from utils import *
 from collections import deque
+import torchvision.transforms as T
+import numpy as np
+from scipy.optimize import linear_sum_assignment
+
+### MAJOR TODO: -improve reID logic, including get_embedding 
+###             -consider constantly updating emb_ref for each player
 
 class IdentityManager:
-    def __init__(self, num_ids, sv_ids):
+    def __init__(self, num_ids, sv_ids, conf_thresh = 0.3):
         self.num_ids = num_ids
         self.sv_id_lookup = self.build_sv_id_lookup(sv_ids)
+        self.conf_thresh = conf_thresh
         self.embeddings = dict() # {pID: embedding reference}
-        self.last_pos = self.build_last_pos() # {pID: DEQUE( recent bbox's )}
+        self.last_pos = dict() # {pID: DEQUE( recent bbox's )}
+        
+        self.transform = T.Compose([
+            T.ToPILImage(),
+            T.Resize((128, 64)),
+            T.ToTensor(),
+            T.Normalize(mean=[0.485, 0.456, 0.406],
+                        std=[0.229, 0.224, 0.225])
+        ])
 
     def build_sv_id_lookup(self, sv_ids):
         # TODO: Error handle if len(sv_ids) != self.num_ids
         sv_id_lookup = dict()
         for pID in range(self.num_ids):
             sv_id_lookup[pID] = sv_ids[pID]
+        return sv_id_lookup
 
-    def build_last_pos(self):
-        last_pos = dict()
-        for pID in range(self.num_ids):
-            last_pos[pID] = deque()
-        return last_pos
+    def build_last_pos(self, selected_boxes):
+        for pID, box in zip(range(self.num_ids), selected_boxes):
+            self.last_pos[pID] = deque([box], maxlen = 5)
     
     def get_sv_id(self, pID):
         # TODO: Error handle an invalid pID
@@ -26,8 +40,9 @@ class IdentityManager:
 
     def get_embedding(self, crop):
         # will improve with some reID model; naive for now
-        emb = crop.flatten() / 255.0
-        return emb
+        rgb_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)  # BGR -> RGB
+        img_tensor = self.transform(rgb_crop)  # Tensor: [C, H, W]
+        return img_tensor.flatten()  # Flattened 1D tensor for cosine similarity
     
     def build_embedding_refs(self, crops):
         if len(crops) != self.num_ids:
@@ -40,38 +55,42 @@ class IdentityManager:
             curr_pID += 1
 
     def identify(self, boxes, frame):
-        """ Returns a dict mapping box_num: ID. """
-        assigned_ids = dict() # {box: ID}
-        id_to_fit = dict() # {ID: (box, fit_scores)}
-        scores = [self.calc_fit_scores(box, frame) for box in boxes]
-
-        Q = deque(zip(boxes, scores))
+        """ Returns a dict mapping box: pID using Hungarian algorithm for optimal assignment. """
+        if not boxes:
+            return dict()
+            
+        # limit boxes to avoid crashes - TODO: handle this more gracefully
+        boxes = boxes[:self.num_ids]
         
-        while Q: # still a box left to identify
-            box, fit_scores = Q.popleft()
-            best_score = max(fit_scores)
-            best_pID = fit_scores.index(best_score)
-            
-            if best_pID not in id_to_fit.keys():
-                id_to_fit[best_pID] = (box, fit_scores)
-            
-            else:
-                other_box, other_fit_scores = id_to_fit[best_pID]
-                other_score = other_fit_scores[best_pID]
-
-                if best_score > other_score:
-                    id_to_fit[best_pID] = (box, fit_scores)
-                    other_fit_scores[best_pID] = -1 # kill the score for this ID
-                    Q.append((other_box, other_fit_scores))
+        # 2D: rows = boxes, cols = pIDs
+        cost_matrix = []
+        for box in boxes:
+            fit_scores = self.calc_fit_scores(box, frame)
+            costs = [1.0 - score for score in fit_scores]
+            cost_matrix.append(costs)
+        
+        cost_matrix = np.array(cost_matrix)
+        
+        if len(boxes) < self.num_ids:
+            # pad with high cost dummy rows
+            dummy_rows = np.full((self.num_ids - len(boxes), self.num_ids), 1.0)
+            cost_matrix = np.vstack([cost_matrix, dummy_rows])
+        
+        # Hungarian matching
+        box_indices, player_indices = linear_sum_assignment(cost_matrix)
+        
+        assigned_ids = dict()
+        
+        for box_idx, player_idx in zip(box_indices, player_indices):
+            if box_idx < len(boxes):  # skip dummy boxes
+                box = boxes[box_idx]
+                cost = cost_matrix[box_idx, player_idx]
+                fit_score = 1.0 - cost
                 
-                else:
-                    fit_scores[best_pID] = -1 # same as above
-                    Q.append((box, fit_scores))
-
-        for pID in id_to_fit.keys():
-            assigned_box = id_to_fit[pID][0]
-            assigned_ids[assigned_box] = pID
+                if fit_score > self.conf_thresh:
+                    assigned_ids[box] = player_idx
         
+        self.update_last_pos(assigned_ids)
         return assigned_ids
 
     def calc_fit_scores(self, box, frame):
@@ -86,7 +105,7 @@ class IdentityManager:
             sim_min, sim_max = -1, 1
             sim_norm = normalize(sim, sim_min, sim_max)
 
-            last_pos = self.last_pos[pID]
+            last_pos = self.last_pos[pID][-1]
             if last_pos is None:
                 curr_score = sim_norm
             
@@ -102,9 +121,7 @@ class IdentityManager:
             fit_scores[pID] = curr_score
 
         return fit_scores
-
-    def add_pos(self, xyxy, id):
-        self.last_pos[id].append(xyxy)
-        # "5" frames is arbitrary... maybe only need most recent pos?
-        if len(self.last_pos[id]) > 5: 
-            self.last_pos[id].popleft()
+    
+    def update_last_pos(self, assigned_ids):
+        for box, pID in assigned_ids.items():
+            self.last_pos[pID].append(box)
