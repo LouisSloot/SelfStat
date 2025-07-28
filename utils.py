@@ -73,5 +73,5 @@ def get_center(box):
     return ((x1 + x2) / 2, (y1 + y2) / 2)
 
 def get_wh(box):
-    _, _, w, h = box.xywh
+    _, _, w, h = map(int, box.xywh.squeeze().tolist())
     return w, h
