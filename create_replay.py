@@ -35,3 +35,4 @@ def create_replay(src, results, id_manager):
         draw_labeled_boxes(annotated_frame, box_to_pID, id_manager)
 
         out.write(annotated_frame)
+        print(f"Successfully created annotated replay at: {dest}")
