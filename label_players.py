@@ -27,17 +27,6 @@ def on_mouse_press(event, x, y, flags, param):
         if box_to_remove > -1:
             param["unlabeled_boxes"].pop(box_to_remove)
 
-def get_frame_from_vid(vid_src, frame_num):
-    cap = cv2.VideoCapture(vid_src)
-    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
-    success, frame = cap.read()
-    cap.release()
-    if success:
-        return frame
-    else:
-        print(f"Failed to get frame {frame_num}. Returning None.")
-        return None
-
 def run_user_labeling(annotated_frame, unlabeled_boxes, param):
     draw_unlabeled_boxes(annotated_frame, unlabeled_boxes)
     cv2.imshow("Label Frame", annotated_frame)
@@ -70,7 +59,7 @@ def supervised_label(detector, vid_src, frame_num):
 
     crops = [crop_frame(box, frame) for box in selected_boxes]
 
-    return sv_ids, crops
+    return sv_ids, crops, selected_boxes
 
 
 def main():
