@@ -1,5 +1,6 @@
 import cv2
 from utils import *
+import time
 
 def draw_labeled_boxes(frame, box_to_pID, id_manager):
     for box, pID in box_to_pID.items():
@@ -21,6 +22,7 @@ def create_replay(src, results, id_manager):
     
     frame_count = get_frame_count(src)
 
+    start = time.time()
     for frame_idx, result in enumerate(results):
 
         if frame_idx % 100 == 0: print(f"Frame {frame_idx} / {frame_count}")
@@ -35,4 +37,10 @@ def create_replay(src, results, id_manager):
         draw_labeled_boxes(annotated_frame, box_to_pID, id_manager)
 
         out.write(annotated_frame)
+    out.release()
+    time_total = time.time() - start()
+
     print(f"Successfully created annotated replay at: {dest}")
+    print(f"Processing took {time_total}s.")
+    print(f"Each frame took {time_total / frame_count}s to process.")
+    print(f"Processed video at {frame_count / time_total} FPS.")
