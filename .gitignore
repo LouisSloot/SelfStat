@@ -2,6 +2,7 @@
 data_dir/train_val_test
 data_dir/raw_games
 annotated_replays/
+*.md
 
 # Pytorch
 *.pth
