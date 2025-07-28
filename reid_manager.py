@@ -170,7 +170,7 @@ class IdentityManager:
         positions = list(self.last_pos[pID])
 
         if len(positions) < 2:
-            return positions[-1] if positions else None
+            return get_corners(positions[0]) if positions else None
         
         # pixles / frame
         x_velos = []
