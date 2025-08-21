@@ -6,9 +6,10 @@ from scipy.optimize import linear_sum_assignment
 import torch
 import torch.nn.functional as F
 from torchreid import models
+import cv2
 
-### MAJOR TODO: -improve reID logic, including get_embedding 
-###             -consider constantly updating emb_ref for each player
+### MAJOR TODO: - reID still insufficient ... more to be done with embeddings?
+###             maybe finetune OSNet, color matching, other ideas...
 
 class IdentityManager:
     """
@@ -31,6 +32,8 @@ class IdentityManager:
         self.update_rate = update_rate
         self.embeddings = dict() # {pID: current embedding reference}
         self.embedding_history = dict() # {pID: deque of recent embeddings}
+        self.color_histograms = dict() # {pID: current color histogram reference}
+        self.color_history = dict() # {pID: deque of recent color histograms}
         self.last_pos = dict() # {pID: DEQUE( recent bbox's )}
         
         if torch.backends.mps.is_available(): # i am developing on a mac
@@ -117,6 +120,58 @@ class IdentityManager:
         
         return features.squeeze(0).cpu()
     
+    def get_color_histogram(self, crop, bins=32):
+        """
+        Extract color histogram features from player crop for color-based matching.
+        Uses HSV color space for better illumination invariance.
+        
+        Args:
+            crop (np.ndarray): Cropped image region containing player
+            bins (int): Number of histogram bins per channel
+            
+        Returns:
+            np.ndarray: Normalized color histogram features
+        """
+        if crop is None or crop.size == 0:
+            return np.zeros(bins * 3)  # H, S, V channels
+        
+        hsv_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+        
+        h_hist = cv2.calcHist([hsv_crop], [0], None, [bins], [0, 180])  # Hue: 0-180
+        s_hist = cv2.calcHist([hsv_crop], [1], None, [bins], [0, 256])  # Saturation: 0-255
+        v_hist = cv2.calcHist([hsv_crop], [2], None, [bins], [0, 256])  # Value: 0-255
+        
+        # normalize histograms
+        h_hist = h_hist.flatten() / (h_hist.sum() + 1e-7)
+        s_hist = s_hist.flatten() / (s_hist.sum() + 1e-7)
+        v_hist = v_hist.flatten() / (v_hist.sum() + 1e-7)
+        
+        color_features = np.concatenate([h_hist, s_hist, v_hist])
+        
+        return color_features
+    
+    def calc_color_sim(self, hist1, hist2):
+        """
+        Calculate similarity between two color histograms using correlation.
+        
+        Args:
+            hist1 (np.ndarray): First color histogram
+            hist2 (np.ndarray): Second color histogram
+            
+        Returns:
+            float: Color similarity score [0-1]
+        """
+        if hist1 is None or hist2 is None:
+            return 0.0
+            
+        corr= cv2.compareHist(hist1.astype(np.float32), 
+                                    hist2.astype(np.float32), 
+                                    cv2.HISTCMP_CORREL)
+        corr_min, corr_max = -1, 1
+        
+        corr = normalize(corr, corr_min, corr_max)
+        return corr
+    
     def build_embedding_refs(self, crops):
         """
         Build initial reference embeddings for each player from labeled crops.
@@ -131,9 +186,14 @@ class IdentityManager:
         curr_pID = 0
         for crop in crops:
             emb = self.get_embedding(crop)
+            color_hist = self.get_color_histogram(crop)
+            
             self.embeddings[curr_pID] = emb
-            # init history with the ref emb
+            self.color_histograms[curr_pID] = color_hist
+            
+            # init history with the ref features
             self.embedding_history[curr_pID] = deque([emb.clone()], maxlen=5)
+            self.color_history[curr_pID] = deque([color_hist.copy()], maxlen=5)
             curr_pID += 1
 
     def identify(self, boxes, frame):
@@ -184,8 +244,8 @@ class IdentityManager:
                     assigned_ids[box] = player_idx
         
         self.update_last_pos(assigned_ids)
-        # Update embeddings with new detections
         self.update_embeddings(assigned_ids, frame)
+
         return assigned_ids
     
     def pred_next_pos(self, pID):
@@ -255,11 +315,15 @@ class IdentityManager:
 
         for pID in range(self.num_ids):
             
+            color_hist_candidate = self.get_color_histogram(crop)
+            
             score_appearance = self.calc_appearance_score(emb_candidate, pID)
+            score_color = self.calc_color_score(color_hist_candidate, pID)
             score_pos = self.calc_position_score(box, pID)
             
-            weight_appearance, weight_pos = 0.7, 0.3
-            score_ovr = (score_appearance * weight_appearance) + (score_pos * weight_pos)
+            scores = [score_appearance, score_color, score_pos]
+            weights = [0.8, 0.05, 0.1]
+            score_ovr = sum([score * weight for (score, weight) in zip(scores, weights)] )
             
             fit_scores[pID] = score_ovr
 
@@ -294,6 +358,35 @@ class IdentityManager:
         score_appearance = normalize(sim_avg, sim_min, sim_max)
 
         return score_appearance
+    
+    def calc_color_score(self, color_hist_candidate, pID):
+        """
+        Calculate color similarity using color histogram history for robust matching.
+        
+        Args:
+            color_hist_candidate (np.ndarray): Color histogram of candidate detection
+            pID (int): Player ID to compare against
+            
+        Returns:
+            float: Normalized color similarity score [0-1]
+        """
+        if pID not in self.color_history:
+            return 0.0
+        
+        history = list(self.color_history[pID])
+        if not history:
+            return 0.0
+        
+        sims = []
+        
+        for color_hist in history:
+            sim = self.calc_color_sim(color_hist_candidate, color_hist)
+            sims.append(sim)
+        
+        # Average similarity across history
+        sim_avg = sum(sims) / len(sims)
+        
+        return sim_avg
 
     def calc_position_score(self, box, pID):
         pred_pos = self.pred_next_pos(pID)
@@ -316,13 +409,21 @@ class IdentityManager:
         for box, pID in assigned_ids.items():
             crop = crop_frame(box, frame)
             new_embedding = self.get_embedding(crop)
+            new_color_hist = self.get_color_histogram(crop)
             
+            # Update embedding with exponential moving average
             current_emb = self.embeddings[pID]
             updated_emb = (1 - self.update_rate) * current_emb + self.update_rate * new_embedding
-            
             self.embeddings[pID] = F.normalize(updated_emb, p=2, dim=0)
             
+            # Update color histogram with exponential moving average
+            current_color = self.color_histograms[pID]
+            updated_color = (1 - self.update_rate) * current_color + self.update_rate * new_color_hist
+            self.color_histograms[pID] = updated_color
+            
+            # Update histories
             self.embedding_history[pID].append(updated_emb.clone())
+            self.color_history[pID].append(updated_color.copy())
     
     def update_last_pos(self, assigned_ids):
         """
